@@ -11,3 +11,8 @@
 
 ## P2 — Enhancement
 - [x] [TASK-005](TASK-005.md) — Remove dead `v-if="false"` alert markup in ZwaveGraph
+
+## P1 — Round 2
+- [x] [TASK-006](TASK-006.md) — Fix loadAllAssociations stuck loading state on exception
+- [x] [TASK-007](TASK-007.md) — Fix removeMember stuck loading spinner on API error
+- [x] [TASK-008](TASK-008.md) — Sync association changes back to Pinia store after add/remove

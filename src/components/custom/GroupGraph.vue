@@ -589,6 +589,7 @@ export default {
 			controllerNode: 'controllerNode',
 			nodesMap: 'nodesMap',
 			storeAssociationsMap: 'associationsMap',
+			storeAssociationsLoaded: 'associationsLoaded',
 		}),
 		fontColor() {
 			return this.$vuetify.theme.current.dark ? '#ddd' : '#333'
@@ -737,41 +738,29 @@ export default {
 			this.paintGraph()
 		},
 		nodes(val) {
-			if (
-				val &&
-				val.length > 0 &&
-				Object.keys(this.associationsMap).length === 0 &&
-				Object.keys(this.storeAssociationsMap).length === 0 &&
-				!this.loading  // don't trigger a second load while one is already in progress
-			) {
-				this.loadAllAssociations()
-			} else {
-				// merge any newly-arrived store data into local map then repaint
+			if (!val || val.length === 0) return
+			if (Object.keys(this.associationsMap).length > 0) {
+				this.paintGraph()
+			} else if (Object.keys(this.storeAssociationsMap).length > 0) {
 				Object.assign(this.associationsMap, this.storeAssociationsMap)
 				this.paintGraph()
+			} else if (!this.storeAssociationsLoaded && !this.loading) {
+				// First-ever load: nodes arrived and nothing has been fetched yet
+				this.loadAllAssociations()
 			}
-		},
-		storeAssociationsMap: {
-			deep: true,
-			handler(val) {
-				if (val && Object.keys(val).length > 0) {
-					Object.assign(this.associationsMap, val)
-					this.paintGraph()
-				}
-			},
 		},
 	},
 	mounted() {
-		// Use cached associations from store if available, skip the heavy API load
-		if (
-			this.storeAssociationsMap &&
-			Object.keys(this.storeAssociationsMap).length > 0
-		) {
+		if (Object.keys(this.storeAssociationsMap).length > 0) {
+			// Cache hit: use stored data, no API call
 			Object.assign(this.associationsMap, this.storeAssociationsMap)
 			this.$nextTick(() => this.paintGraph())
-		} else if (this.nodes && this.nodes.length > 0) {
+		} else if (!this.storeAssociationsLoaded && this.nodes && this.nodes.length > 0) {
+			// First load: nothing fetched yet in this session
 			this.loadAllAssociations()
 		}
+		// else: storeAssociationsLoaded=true but map is empty (e.g. after network reset)
+		// — show empty state, user can hit Refresh
 	},
 	beforeUnmount() {
 		this.stopAnimation()
@@ -780,7 +769,7 @@ export default {
 		if (this.hoverTimeout) clearTimeout(this.hoverTimeout)
 	},
 	methods: {
-		...mapActions(useBaseStore, ['setAssociations']),
+		...mapActions(useBaseStore, ['setAssociations', 'clearAssociations']),
 		onResize() {
 			this.containerHeight = this.$refs.container.$el.offsetHeight
 			const maxHeight = window.innerHeight - 180
@@ -848,41 +837,45 @@ export default {
 
 		async loadAllAssociations() {
 			this.loading = true
+			this.clearAssociations()
 			this.associationsMap = {}
-			const nonControllerNodes = this.nodes.filter(
-				(n) => !n.isControllerNode,
-			)
+			try {
+				const nonControllerNodes = this.nodes.filter(
+					(n) => !n.isControllerNode,
+				)
 
-			// Timeout sentinel so a hung socket call never blocks the whole load
-			const withTimeout = (promise, ms) =>
-				Promise.race([
-					promise,
-					new Promise((resolve) =>
-						setTimeout(() => resolve({ success: false }), ms),
-					),
-				])
+				// Timeout sentinel so a hung socket call never blocks the whole load
+				const withTimeout = (promise, ms) =>
+					Promise.race([
+						promise,
+						new Promise((resolve) =>
+							setTimeout(() => resolve({ success: false }), ms),
+						),
+					])
 
-			for (let i = 0; i < nonControllerNodes.length; i++) {
-				const node = nonControllerNodes[i]
-				this.loadProgress = `${i + 1} / ${nonControllerNodes.length} nodes`
-				try {
-					const response = await withTimeout(
-						this.app.apiRequest('getAssociations', [node.id, false]),
-						5000,
-					)
-					if (response.success) {
-						this.associationsMap[node.id] = response.result
+				for (let i = 0; i < nonControllerNodes.length; i++) {
+					const node = nonControllerNodes[i]
+					this.loadProgress = `${i + 1} / ${nonControllerNodes.length} nodes`
+					try {
+						const response = await withTimeout(
+							this.app.apiRequest('getAssociations', [node.id, false]),
+							5000,
+						)
+						if (response.success) {
+							this.associationsMap[node.id] = response.result
+						}
+					} catch {
+						// node may not support associations
 					}
-				} catch {
-					// node may not support associations
 				}
-			}
 
-			this.loading = false
-			this.loadProgress = ''
-			// Persist to store so re-mounting the component uses cached data
-			this.setAssociations(this.associationsMap)
-			this.paintGraph()
+				// Persist to store so re-mounting the component uses cached data
+				this.setAssociations(this.associationsMap)
+				this.paintGraph()
+			} finally {
+				this.loading = false
+				this.loadProgress = ''
+			}
 		},
 
 		toggleDemoMode() {
@@ -892,7 +885,13 @@ export default {
 				if (this.liveMode) this.startDemoSimulation()
 			} else {
 				this.stopDemoSimulation()
-				this.loadAllAssociations()
+				// Restore from cache; only fetch if nothing was ever loaded
+				if (Object.keys(this.storeAssociationsMap).length > 0) {
+					Object.assign(this.associationsMap, this.storeAssociationsMap)
+					this.paintGraph()
+				} else {
+					this.loadAllAssociations()
+				}
 			}
 		},
 
@@ -1545,9 +1544,12 @@ export default {
 			const resp = await this.app.apiRequest('addAssociations', [source, group.groupId, [target]])
 			this.addTargetNode = { ...this.addTargetNode, [group.groupKey]: null }
 			if (resp.success) {
-				// Fetch fresh data once, update local cache, repaint, reopen panel
+				// Fetch fresh data once, update local cache, sync store, repaint, reopen panel
 				const fresh = await this.app.apiRequest('getAssociations', [this.managePanelNode.id, false])
-				if (fresh.success) this.associationsMap[this.managePanelNode.id] = fresh.result
+				if (fresh.success) {
+					this.associationsMap[this.managePanelNode.id] = fresh.result
+					this.setAssociations(this.associationsMap)
+				}
 				this.paintGraph()
 				await this.openManagePanel(this.managePanelNode.id)
 			}
@@ -1559,11 +1561,18 @@ export default {
 			this.removeLoading = { ...this.removeLoading, [key]: true }
 			const source = { nodeId: this.managePanelNode.id, endpoint: group.endpoint ?? undefined }
 			const target = { nodeId: member.nodeId, endpoint: member.targetEndpoint >= 0 ? member.targetEndpoint : undefined }
-			const resp = await this.app.apiRequest('removeAssociations', [source, group.groupId, [target]])
-			this.removeLoading = { ...this.removeLoading, [key]: false }
-			if (resp.success) {
+			let resp
+			try {
+				resp = await this.app.apiRequest('removeAssociations', [source, group.groupId, [target]])
+			} finally {
+				this.removeLoading = { ...this.removeLoading, [key]: false }
+			}
+			if (resp?.success) {
 				const fresh = await this.app.apiRequest('getAssociations', [this.managePanelNode.id, false])
-				if (fresh.success) this.associationsMap[this.managePanelNode.id] = fresh.result
+				if (fresh.success) {
+					this.associationsMap[this.managePanelNode.id] = fresh.result
+					this.setAssociations(this.associationsMap)
+				}
 				this.paintGraph()
 				await this.openManagePanel(this.managePanelNode.id)
 			}
