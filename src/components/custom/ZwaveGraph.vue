@@ -169,13 +169,11 @@
 									class="mt-1"
 								>
 									<v-btn value="routes" size="small">Routes</v-btn>
-									<v-btn value="associations" size="small">Associations</v-btn>
-									<v-btn value="groups" size="small">Groups</v-btn>
-									<v-btn value="shared" size="small">Shared</v-btn>
+									<v-btn value="locations" size="small">Locations</v-btn>
 								</v-btn-toggle>
 							</div>
 
-							<div class="mt-3" v-if="graphMode !== 'routes'">
+							<div class="mt-3">
 								<v-list-subheader class="pa-0">Layout</v-list-subheader>
 								<v-btn-toggle
 									v-model="assocLayoutMode"
@@ -184,7 +182,7 @@
 									color="primary"
 									class="mt-1"
 								>
-									<v-btn value="force" size="small" prepend-icon="hub">Force</v-btn>
+									<v-btn value="force" size="small">Default</v-btn>
 									<v-btn value="hierarchical" size="small" prepend-icon="account_tree">Hierarchy</v-btn>
 								</v-btn-toggle>
 							</div>
@@ -214,16 +212,6 @@
 				ref="container"
 				v-resize="onResize"
 			>
-				<v-alert
-					v-if="graphMode !== 'routes' && !hasAssociationData"
-					type="warning"
-					variant="tonal"
-					density="compact"
-					class="mb-2"
-					icon="warning"
-				>
-					Open the Association Graph tab first to load association data.
-				</v-alert>
 				<div
 					:style="{
 						height: containerHeight + 'px',
@@ -523,7 +511,7 @@ export default {
 			this.paintGraph()
 		},
 		assocLayoutMode() {
-			if (this.graphMode !== 'routes') this.paintGraph()
+			this.paintGraph()
 		},
 		filteredNodes(val, oldVal) {
 			if (!arraysEqual(val, oldVal)) {
@@ -898,26 +886,9 @@ export default {
 			}
 		},
 		paintGraph() {
-			// Dispatch to association view modes when not in routes mode
-			if (this.graphMode === 'associations') {
+			if (this.graphMode === 'locations') {
 				this.destroyNetwork()
-				if (!this.hasAssociationData) return
-				const { groups, groupMemberships } = this.buildGroupData()
-				this.paintAssociationsView(groups, groupMemberships)
-				return
-			}
-			if (this.graphMode === 'groups') {
-				this.destroyNetwork()
-				if (!this.hasAssociationData) return
-				const { groups, groupMemberships } = this.buildGroupData()
-				this.paintGroupsView(groups, groupMemberships)
-				return
-			}
-			if (this.graphMode === 'shared') {
-				this.destroyNetwork()
-				if (!this.hasAssociationData) return
-				const { groups, groupMemberships } = this.buildGroupData()
-				this.paintSharedView(groups, groupMemberships)
+				this.paintLocationsView()
 				return
 			}
 
@@ -966,7 +937,7 @@ export default {
 					// shadow: true,
 				},
 				physics: {
-					enabled: true,
+					enabled: this.assocLayoutMode !== 'hierarchical',
 					stabilization: {
 						enabled: true,
 						iterations: 50,
@@ -980,17 +951,29 @@ export default {
 						avoidOverlap: 0.15,
 					},
 				},
+				layout: this.assocLayoutMode === 'hierarchical'
+					? { hierarchical: { enabled: true, direction: 'UD', sortMethod: 'directed', levelSeparation: 120 } }
+					: { hierarchical: false },
 			}
 
 			this.network = new Network(container, data, options)
 
 			// event handlers
 			// https://visjs.github.io/vis-network/docs/network/#Events
-			this.network.once('stabilizationIterationsDone', () => {
-				this.loading = false
-				this.network.setOptions({ physics: false })
-				this.setSelection()
-			})
+			if (this.assocLayoutMode === 'hierarchical') {
+				// Hierarchical layout doesn't use physics so stabilizationIterationsDone never fires
+				this.$nextTick(() => {
+					this.loading = false
+					this.network.fit()
+					this.setSelection()
+				})
+			} else {
+				this.network.once('stabilizationIterationsDone', () => {
+					this.loading = false
+					this.network.setOptions({ physics: false })
+					this.setSelection()
+				})
+			}
 
 			this.network.on('afterDrawing', (ctx) => {
 				this.renderPulses(ctx)
@@ -1486,316 +1469,67 @@ export default {
 			return node.failed || !node.available || node.status === 'Dead'
 		},
 
-		// Build flat list of group objects from associationsMap (same as GroupGraph.buildGroupData)
-		buildGroupData() {
-			const groups = []
-			const groupMemberships = {} // nodeId -> [groupKey]
-
-			for (const node of this.allNodes) {
-				if (node.isControllerNode) continue
-				if (!node.groups || node.groups.length === 0) continue
-
-				const nodeAssociations = this.associationsMap[node.id] || []
-
-				for (const g of node.groups) {
-					const groupKey = `n${node.id}_ep${g.endpoint}_g${g.value}`
-					const members = nodeAssociations.filter(
-						(a) => a.groupId === g.value && a.endpoint === g.endpoint,
-					)
-
-					const isLifeline =
-						g.title?.toLowerCase().includes('lifeline') || g.value === 1
-
-					for (const m of members) {
-						if (!groupMemberships[m.nodeId])
-							groupMemberships[m.nodeId] = []
-						if (!groupMemberships[m.nodeId].includes(groupKey)) {
-							groupMemberships[m.nodeId].push(groupKey)
-						}
-					}
-
-					groups.push({
-						groupKey,
-						nodeId: node.id,
-						groupId: g.value,
-						endpoint: g.endpoint,
-						title: g.title || `Group ${g.value}`,
-						maxNodes: g.maxNodes,
-						multiChannel: g.multiChannel,
-						isLifeline,
-						members,
-						hasDeadMember: members.some((m) => this._assocIsNodeDead(m.nodeId)),
-					})
-				}
-			}
-
-			return { groups, groupMemberships }
-		},
-
-		addNodeVis(visNodes, nodeId, groupMemberships) {
-			const idx = this.nodesMap.get(nodeId)
-			const node = idx !== undefined ? this.allNodes[idx] : null
-			const isDead = this._assocIsNodeDead(nodeId)
-			const memberships = groupMemberships[nodeId] || []
-			const isShared = memberships.length > 1
-
-			const nodeColor = isDead
-				? GROUP_DEAD_COLOR
-				: isShared
-					? SHARED_NODE_COLOR
-					: this._assocGetNodeStatusColor(nodeId)
-
-			const shape = node?.isListening === false ? 'square' : 'hexagon'
-
-			visNodes.add({
-				id: `node_${nodeId}`,
-				label: isDead
-					? `⚠ ${this._assocGetNodeName(nodeId)}`
-					: this._assocGetNodeName(nodeId),
-				shape,
-				color: {
-					background: nodeColor,
-					border: nodeColor,
-					highlight: { background: nodeColor, border: '#fff' },
-				},
-				font: {
-					color: isDead ? '#ff5252' : this.fontColor,
-					size: 12,
-					bold: isDead,
-				},
-				size: 16,
-				borderWidth: isDead ? 3 : 1,
-				_type: 'node',
-				_nodeId: nodeId,
-				_groupMemberships: memberships,
-				_status: this._assocGetNodeStatus(nodeId),
-				_groupCount: node?.groups?.length || 0,
-			})
-		},
-
-		paintAssociationsView(groups, groupMemberships) {
+		paintLocationsView() {
 			const visNodes = new DataSet()
 			const visEdges = new DataSet()
 
+			// Palette for location cluster nodes
+			const palette = [
+				'#00BCD4', '#7E57C2', '#26A69A', '#EF5350',
+				'#FF7043', '#29B6F6', '#66BB6A', '#FFA726',
+				'#EC407A', '#8D6E63',
+			]
+			const locationColors = {}
+			let colorIdx = 0
+			const getLocationColor = (loc) => {
+				const key = loc || '(No location)'
+				if (!locationColors[key]) {
+					locationColors[key] = palette[colorIdx % palette.length]
+					colorIdx++
+				}
+				return locationColors[key]
+			}
+
+			// Add location cluster nodes
+			const locationGroups = {}
 			for (const node of this.allNodes) {
-				const isDead = this._assocIsNodeDead(node.id)
-				const memberships = groupMemberships[node.id] || []
-				const isShared = memberships.length > 1
-				const statusColor = this._assocGetNodeStatusColor(node.id)
-				const color = isDead
-					? '#8b0000'
-					: node.isControllerNode
-						? '#7e57c2'
-						: isShared
-							? SHARED_NODE_COLOR
-							: statusColor
-				const shape = node.isControllerNode
-					? 'star'
-					: node.isListening === false
-						? 'square'
-						: 'hexagon'
+				const loc = node.loc || '(No location)'
+				if (!locationGroups[loc]) locationGroups[loc] = []
+				locationGroups[loc].push(node)
+			}
+			for (const loc of Object.keys(locationGroups)) {
+				const color = getLocationColor(loc)
 				visNodes.add({
-					id: `node_${node.id}`,
-					label: node.isControllerNode
-						? 'Controller'
-						: isDead
-							? `⚠ ${this._assocGetNodeName(node.id)}`
-							: this._assocGetNodeName(node.id),
-					shape,
-					color: {
-						background: color,
-						border: color,
-						highlight: { background: color, border: '#fff' },
-					},
-					font: {
-						color: isDead ? '#ff5252' : this.fontColor,
-						size: 12,
-						bold: isDead,
-					},
-					size: node.isControllerNode ? 22 : 16,
-					borderWidth: isDead ? 3 : 1,
-					_type: 'node',
-					_nodeId: node.id,
-					_status: this._assocGetNodeStatus(node.id),
-					_groupCount: node.groups?.length || 0,
-					_groupMemberships: memberships,
+					id: `loc_${loc}`,
+					label: loc,
+					shape: 'ellipse',
+					color: { background: color, border: color, highlight: { background: color, border: '#fff' } },
+					font: { color: '#fff', size: 13, bold: true },
+					size: 24,
+					_type: 'location',
 				})
 			}
 
-			const edgeMap = {}
-			for (const g of groups) {
-				for (const m of g.members) {
-					const key = `${g.nodeId}_${m.nodeId}`
-					if (!edgeMap[key])
-						edgeMap[key] = { nodeId: g.nodeId, targetId: m.nodeId, groupList: [] }
-					edgeMap[key].groupList.push(g)
-				}
-			}
-
-			for (const data of Object.values(edgeMap)) {
-				const allLifeline = data.groupList.every((g) => g.isLifeline)
-				const hasDead = data.groupList.some((g) => g.hasDeadMember)
-				const labels = data.groupList.map((g) => g.title).join('\n')
-				const color = hasDead
-					? GROUP_DEAD_COLOR
-					: allLifeline
-						? GROUP_LIFELINE_COLOR
-						: GROUP_COLOR
-				visEdges.add({
-					id: `${data.nodeId}_${data.targetId}`,
-					from: `node_${data.nodeId}`,
-					to: `node_${data.targetId}`,
-					title: labels,
-					dashes: false,
-					color: { color, opacity: allLifeline ? 0.5 : 0.9 },
-					arrows: { to: { enabled: true, scaleFactor: 0.6 } },
-					width: Math.min(data.groupList.length + 1, 4),
-					_type: 'association',
-					_groups: data.groupList,
-				})
-			}
-
-			this._createAssocNetwork(visNodes, visEdges)
-		},
-
-		paintGroupsView(groups, groupMemberships) {
-			const visNodes = new DataSet()
-			const visEdges = new DataSet()
-			const addedNodes = new Set()
-
-			for (const g of groups) {
-				const isLifeline = g.isLifeline
-				const color = g.hasDeadMember
-					? GROUP_DEAD_COLOR
-					: isLifeline
-						? GROUP_LIFELINE_COLOR
-						: GROUP_COLOR
-
-				visNodes.add({
-					id: g.groupKey,
-					label: `${this._assocGetNodeName(g.nodeId)}\n${g.title}`,
-					shape: 'diamond',
-					color: {
-						background: color,
-						border: color,
-						highlight: { background: color, border: '#fff' },
-					},
-					font: { color: this.fontColor, size: 11, multi: false },
-					size: 20 + Math.min(g.members.length * 3, 20),
-					_type: 'group',
-					_groupData: g,
-					_sourceNodeName: this._assocGetNodeName(g.nodeId),
-				})
-
-				const srcId = `node_${g.nodeId}`
-				if (!addedNodes.has(srcId)) {
-					addedNodes.add(srcId)
-					this.addNodeVis(visNodes, g.nodeId, groupMemberships)
-				}
+			// Add device nodes using the exact same visual as Routes view.
+			// parseNode calls parseRouteStats which writes into this.priorityEdges —
+			// save and restore so Locations view doesn't corrupt the routes graph state.
+			const savedPriorityEdges = { ...this.priorityEdges }
+			for (const node of this.allNodes) {
+				const loc = node.loc || '(No location)'
+				const color = getLocationColor(loc)
+				const { node: entity } = this.parseNode(node, [])
+				visNodes.add(entity)
 
 				visEdges.add({
-					from: srcId,
-					to: g.groupKey,
-					color: { color: color, opacity: 0.7 },
+					from: `loc_${loc}`,
+					to: node.id,
+					color: { color, opacity: 0.5 },
 					dashes: false,
-					arrows: { to: { enabled: true, scaleFactor: 0.6 } },
-					width: 1.5,
-					_type: 'source',
+					width: 1,
+					arrows: { to: { enabled: false } },
 				})
-
-				for (const m of g.members) {
-					const mId = `node_${m.nodeId}`
-					if (!addedNodes.has(mId)) {
-						addedNodes.add(mId)
-						this.addNodeVis(visNodes, m.nodeId, groupMemberships)
-					}
-
-					const edgeColor = this._assocIsNodeDead(m.nodeId)
-						? GROUP_DEAD_COLOR
-						: color
-					visEdges.add({
-						from: g.groupKey,
-						to: mId,
-						color: { color: edgeColor, opacity: 0.85 },
-						dashes: false,
-						arrows: { to: { enabled: true, scaleFactor: 0.5 } },
-						width: this._assocIsNodeDead(m.nodeId) ? 2 : 1,
-						_type: 'member',
-					})
-				}
 			}
-
-			this._createAssocNetwork(visNodes, visEdges)
-		},
-
-		paintSharedView(groups, groupMemberships) {
-			const visNodes = new DataSet()
-			const visEdges = new DataSet()
-			const addedNodes = new Set()
-
-			const sharedNodeIds = new Set(
-				Object.entries(groupMemberships)
-					.filter(([, m]) => m.length > 1)
-					.map(([id]) => parseInt(id)),
-			)
-
-			for (const g of groups) {
-				const sharedMembers = g.members.filter((m) =>
-					sharedNodeIds.has(m.nodeId),
-				)
-				if (sharedMembers.length === 0) continue
-
-				const color = g.hasDeadMember
-					? GROUP_DEAD_COLOR
-					: g.isLifeline
-						? GROUP_LIFELINE_COLOR
-						: GROUP_COLOR
-
-				if (!visNodes.get(g.groupKey)) {
-					visNodes.add({
-						id: g.groupKey,
-						label: `${this._assocGetNodeName(g.nodeId)}\n${g.title}`,
-						shape: 'diamond',
-						color: { background: color, border: color },
-						font: { color: this.fontColor, size: 11 },
-						size: 16,
-						_type: 'group',
-						_groupData: g,
-						_sourceNodeName: this._assocGetNodeName(g.nodeId),
-					})
-				}
-
-				for (const m of sharedMembers) {
-					const mId = `node_${m.nodeId}`
-					if (!addedNodes.has(mId)) {
-						addedNodes.add(mId)
-						const nodeColor = this._assocIsNodeDead(m.nodeId)
-							? GROUP_DEAD_COLOR
-							: SHARED_NODE_COLOR
-						const node = this.allNodes[this.nodesMap.get(m.nodeId)]
-						visNodes.add({
-							id: mId,
-							label: this._assocGetNodeName(m.nodeId),
-							shape: 'hexagon',
-							color: { background: nodeColor, border: nodeColor },
-							font: { color: this.fontColor, size: 12 },
-							size: 18,
-							_type: 'node',
-							_nodeId: m.nodeId,
-							_groupMemberships: groupMemberships[m.nodeId] || [],
-							_status: this._assocGetNodeStatus(m.nodeId),
-							_groupCount: node?.groups?.length || 0,
-						})
-					}
-					visEdges.add({
-						from: mId,
-						to: g.groupKey,
-						color: { color: SHARED_NODE_COLOR, opacity: 0.8 },
-						width: 2,
-						arrows: { to: { enabled: true, scaleFactor: 0.5 } },
-					})
-				}
-			}
+			this.priorityEdges = savedPriorityEdges
 
 			this._createAssocNetwork(visNodes, visEdges)
 		},
@@ -1858,10 +1592,17 @@ export default {
 				options,
 			)
 
-			this.network.once('stabilizationIterationsDone', () => {
-				this.loading = false
-				this.network.setOptions({ physics: { enabled: false } })
-			})
+			if (isHierarchical) {
+				this.$nextTick(() => {
+					this.loading = false
+					this.network.fit()
+				})
+			} else {
+				this.network.once('stabilizationIterationsDone', () => {
+					this.loading = false
+					this.network.setOptions({ physics: { enabled: false } })
+				})
+			}
 
 			this.network.on('afterDrawing', (ctx) => {
 				this.renderPulses(ctx)

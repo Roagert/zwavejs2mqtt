@@ -13,7 +13,7 @@ function responseHandler(response) {
 	if (response.data && response.data.code === 3) {
 		localStorage.removeItem('logged')
 		Router.push('/')
-		throw Error(response.message || 'Authentication failed')
+		throw Error(response.data?.message || 'Authentication failed')
 	}
 
 	return response

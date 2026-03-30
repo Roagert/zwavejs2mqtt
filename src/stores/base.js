@@ -116,6 +116,7 @@ const useBaseStore = defineStore('base', {
 			defaultFrequency: undefined,
 		},
 		associationsMap: {}, // { [nodeId]: ZUIGroupAssociation[] }
+		associationsLoaded: false, // true once a full fetch has completed — prevents auto-refetch on remount
 		devices: [],
 		gateway: {
 			type: 0,
@@ -343,9 +344,13 @@ const useBaseStore = defineStore('base', {
 		removeNode(n) {
 			const index = this.nodesMap.get(n.id)
 
-			if (index >= 0) {
+			if (index !== undefined) {
 				this.nodesMap.delete(n.id)
 				this.nodes.splice(index, 1)
+				// Splice shifts all subsequent array indices down by 1 — update the map
+				for (const [id, idx] of this.nodesMap.entries()) {
+					if (idx > index) this.nodesMap.set(id, idx - 1)
+				}
 			}
 		},
 		setNeighbors(neighbors) {
@@ -513,11 +518,22 @@ const useBaseStore = defineStore('base', {
 			if (!data) return
 			// Bulk init: { [nodeId]: associations[] }
 			if (typeof data === 'object' && !data.nodeId) {
-				this.associationsMap = { ...data }
+				// Only overwrite in-memory data if the incoming payload is non-empty.
+				// An empty {} arrives on socket reconnect before the backend has the
+				// cache warm, and would wipe a previously-loaded associationsMap.
+				if (Object.keys(data).length > 0) {
+					this.associationsMap = { ...data }
+					this.associationsLoaded = true
+				}
 			} else {
 				// Incremental update: { nodeId, associations }
 				this.associationsMap[String(data.nodeId)] = data.associations
+				this.associationsLoaded = true
 			}
+		},
+		clearAssociations() {
+			this.associationsMap = {}
+			this.associationsLoaded = false
 		},
 		setRebuildRoutesProgress(nodesProgress) {
 			for (const [nodeId, progress] of nodesProgress) {
