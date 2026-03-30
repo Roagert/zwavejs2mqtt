@@ -493,6 +493,7 @@ export default {
 				case Routes.store:
 					return ['list-item-two-line@10', 'divider']
 				case Routes.mesh:
+				case Routes.groupGraph:
 					return ['list-item-two-line, image']
 				case Routes.zniffer:
 				case Routes.debug:
@@ -540,6 +541,12 @@ export default {
 					icon: 'share',
 					title: 'Network graph',
 					path: Routes.mesh,
+				})
+
+				pages.push({
+					icon: 'hub',
+					title: 'Group graph',
+					path: Routes.groupGraph,
 				})
 			}
 
