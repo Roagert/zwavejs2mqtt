@@ -151,7 +151,7 @@
 					</v-row>
 
 					<v-row class="mt-0">
-						<v-col>
+						<v-col class="d-flex align-center flex-wrap ga-2">
 							<v-btn
 								color="primary"
 								variant="tonal"
@@ -160,8 +160,58 @@
 								@click="loadAllAssociations"
 								prepend-icon="refresh"
 							>
-								Refresh All Associations
+								Refresh
 							</v-btn>
+							<v-btn
+								:color="demoMode ? 'warning' : 'secondary'"
+								variant="tonal"
+								size="small"
+								@click="toggleDemoMode"
+								prepend-icon="science"
+							>
+								{{ demoMode ? 'Exit Demo' : 'Demo Mode' }}
+							</v-btn>
+							<v-btn
+								:color="liveMode ? 'success' : 'secondary'"
+								variant="tonal"
+								size="small"
+								@click="toggleLiveMode"
+								:prepend-icon="
+									liveMode
+										? 'wifi_tethering'
+										: 'wifi_tethering_off'
+								"
+							>
+								{{ liveMode ? 'Live On' : 'Live Off' }}
+							</v-btn>
+							<v-btn
+								color="info"
+								variant="tonal"
+								size="small"
+								@click="replayGroupFlow"
+								:loading="replaying"
+								prepend-icon="play_circle"
+							>
+								Replay Flow
+							</v-btn>
+							<v-chip
+								v-if="liveMode"
+								color="success"
+								size="small"
+								prepend-icon="circle"
+								class="animate-pulse-chip"
+							>
+								Listening for events
+							</v-chip>
+							<v-chip
+								v-if="replaying"
+								color="info"
+								size="small"
+								prepend-icon="circle"
+								class="animate-pulse-chip"
+							>
+								{{ replayLabel }}
+							</v-chip>
 						</v-col>
 					</v-row>
 				</v-expansion-panel-text>
@@ -482,6 +532,8 @@ export default {
 		},
 	},
 	network: null,
+	_animationId: null,
+	_demoInterval: null,
 	data() {
 		return {
 			openPanel: -1,
@@ -500,6 +552,11 @@ export default {
 			hoverTimeout: null,
 			showDetail: false,
 			selectedDetail: null,
+			demoMode: false,
+			liveMode: false,
+			replaying: false,
+			replayLabel: '',
+			pulses: [], // { from, to, progress, color, onComplete }
 			// associationsMap: nodeId -> [{ endpoint, groupId, nodeId (member), targetEndpoint }]
 			associationsMap: {},
 			legends: [
@@ -589,6 +646,8 @@ export default {
 		}
 	},
 	beforeUnmount() {
+		this.stopAnimation()
+		this.teardownLiveEvents()
 		this.destroyNetwork()
 		if (this.hoverTimeout) clearTimeout(this.hoverTimeout)
 	},
@@ -601,11 +660,13 @@ export default {
 			}
 		},
 		destroyNetwork() {
+			this.stopAnimation()
 			if (this.network) {
 				this.network.destroy()
 				this.network = null
 				if (this.$refs.content) this.$refs.content.innerHTML = ''
 			}
+			this.pulses = []
 		},
 		getNodeName(nodeId) {
 			const idx = this.nodesMap.get(nodeId)
@@ -658,6 +719,379 @@ export default {
 			this.loadProgress = ''
 			this.paintGraph()
 		},
+
+		toggleDemoMode() {
+			this.demoMode = !this.demoMode
+			if (this.demoMode) {
+				this.loadDemoAssociations()
+				if (this.liveMode) this.startDemoSimulation()
+			} else {
+				this.stopDemoSimulation()
+				this.loadAllAssociations()
+			}
+		},
+
+		loadDemoAssociations() {
+			// Build rich synthetic associations using the real node list so
+			// names / IDs remain accurate, only the cross-node wiring is fictional.
+			const nonCtrl = this.nodes.filter((n) => !n.isControllerNode)
+			if (nonCtrl.length < 3) return
+
+			const demo = {}
+
+			// Helper – pick N unique random nodes excluding `self`
+			const pick = (self, n) => {
+				const pool = nonCtrl
+					.filter((x) => x.id !== self)
+					.map((x) => x.id)
+				const out = []
+				while (out.length < n && pool.length > 0) {
+					const idx = Math.floor(Math.random() * pool.length)
+					out.push(pool.splice(idx, 1)[0])
+				}
+				return out
+			}
+
+			for (const node of nonCtrl) {
+				const assocs = []
+				const groups = node.groups || []
+
+				// Group 1 – Lifeline always points to controller
+				assocs.push({
+					endpoint: 0,
+					groupId: 1,
+					nodeId: 1,
+					targetEndpoint: 0,
+				})
+
+				// Remaining groups: wire 1-3 random peers into some of them
+				for (const g of groups.slice(1, 6)) {
+					// ~60 % chance a group has non-lifeline members
+					if (Math.random() < 0.6) {
+						const targets = pick(
+							node.id,
+							Math.ceil(Math.random() * 2),
+						)
+						for (const t of targets) {
+							assocs.push({
+								endpoint: g.endpoint ?? 0,
+								groupId: g.value,
+								nodeId: t,
+								targetEndpoint: 0,
+							})
+						}
+					}
+				}
+
+				demo[node.id] = assocs
+			}
+
+			this.associationsMap = demo
+			this.paintGraph()
+		},
+
+		// ── Live / animation ──────────────────────────────────────────────────
+
+		toggleLiveMode() {
+			this.liveMode = !this.liveMode
+			if (this.liveMode) {
+				this.setupLiveEvents()
+				if (this.demoMode) this.startDemoSimulation()
+			} else {
+				this.teardownLiveEvents()
+				this.stopDemoSimulation()
+			}
+		},
+
+		setupLiveEvents() {
+			if (!this.socket) return
+			this.socket.on('VALUE_UPDATED', this._onValueUpdated)
+			this.socket.on('NODE_EVENT', this._onNodeEvent)
+		},
+
+		teardownLiveEvents() {
+			if (!this.socket) return
+			this.socket.off('VALUE_UPDATED', this._onValueUpdated)
+			this.socket.off('NODE_EVENT', this._onNodeEvent)
+			this.stopDemoSimulation()
+		},
+
+		_onValueUpdated(data) {
+			if (!this.liveMode || !this.network) return
+			const nodeId = data?.nodeId ?? data?.id
+			if (!nodeId) return
+			// Choose colour by commandClassName
+			const cc = data?.commandClassName || ''
+			const color = cc.includes('Binary')
+				? '#00BCD4'
+				: cc.includes('Multilevel')
+					? '#F1C40F'
+					: cc.includes('Notification')
+						? '#FF7043'
+						: '#2DCC70'
+			this.spawnPulsesForNode(nodeId, color, cc || 'Value updated')
+		},
+
+		_onNodeEvent(data) {
+			if (!this.liveMode || !this.network) return
+			const nodeId = data?.nodeId ?? data?.id
+			if (!nodeId) return
+			this.spawnPulsesForNode(
+				nodeId,
+				'#7e57c2',
+				data?.event || 'Node event',
+			)
+		},
+
+		spawnPulsesForNode(nodeId, color, label) {
+			if (!this.network) return
+			const { groups } = this.buildGroupData()
+			const srcId = `node_${nodeId}`
+
+			// Groups owned by this node that have members → pulse outward
+			const ownedGroups = groups.filter(
+				(g) => g.nodeId === nodeId && g.members.length > 0,
+			)
+			for (const g of ownedGroups) {
+				const from = this.getNodeCanvasPos(srcId)
+				const mid = this.getNodeCanvasPos(g.groupKey)
+				if (!from || !mid) continue
+
+				// Phase 1: node → group diamond
+				this.pulses.push({
+					from: { ...from },
+					to: { ...mid },
+					progress: 0,
+					color,
+					label,
+					onComplete: () => {
+						// Phase 2: group diamond → each member
+						for (const m of g.members) {
+							const mPos = this.getNodeCanvasPos(
+								`node_${m.nodeId}`,
+							)
+							if (!mPos) continue
+							this.pulses.push({
+								from: { ...mid },
+								to: { ...mPos },
+								progress: 0,
+								color,
+								label,
+							})
+						}
+					},
+				})
+			}
+
+			// Groups this node is a MEMBER of → pulse inward (receiving)
+			const memberGroups = groups.filter(
+				(g) =>
+					g.nodeId !== nodeId &&
+					g.members.some((m) => m.nodeId === nodeId),
+			)
+			for (const g of memberGroups) {
+				const grpPos = this.getNodeCanvasPos(g.groupKey)
+				const mPos = this.getNodeCanvasPos(srcId)
+				if (!grpPos || !mPos) continue
+				this.pulses.push({
+					from: { ...grpPos },
+					to: { ...mPos },
+					progress: 0,
+					color: color + 'bb',
+					label,
+				})
+			}
+		},
+
+		getNodeCanvasPos(visNodeId) {
+			if (!this.network) return null
+			try {
+				return this.network.getPosition(visNodeId)
+			} catch {
+				return null
+			}
+		},
+
+		startAnimation() {
+			this.stopAnimation()
+			const tick = () => {
+				this.advancePulses()
+				if (this.network && this.pulses.length > 0) {
+					this.network.redraw()
+				}
+				this.$options._animationId = requestAnimationFrame(tick)
+			}
+			this.$options._animationId = requestAnimationFrame(tick)
+		},
+
+		stopAnimation() {
+			if (this.$options._animationId) {
+				cancelAnimationFrame(this.$options._animationId)
+				this.$options._animationId = null
+			}
+		},
+
+		advancePulses() {
+			const SPEED = 0.013
+			const next = []
+			for (const p of this.pulses) {
+				p.progress += SPEED
+				if (p.progress >= 1) {
+					if (p.onComplete) p.onComplete()
+				} else {
+					next.push(p)
+				}
+			}
+			this.pulses = next
+		},
+
+		renderPulses(ctx) {
+			if (!this.pulses.length) return
+			ctx.save()
+			for (const p of this.pulses) {
+				const t = p.progress
+				const x = p.from.x + (p.to.x - p.from.x) * t
+				const y = p.from.y + (p.to.y - p.from.y) * t
+
+				// Trailing glow
+				const grad = ctx.createRadialGradient(x, y, 0, x, y, 14)
+				grad.addColorStop(0, p.color + 'ff')
+				grad.addColorStop(0.4, p.color + '88')
+				grad.addColorStop(1, p.color + '00')
+				ctx.beginPath()
+				ctx.arc(x, y, 14, 0, Math.PI * 2)
+				ctx.fillStyle = grad
+				ctx.fill()
+
+				// Core dot
+				ctx.beginPath()
+				ctx.arc(x, y, 5, 0, Math.PI * 2)
+				ctx.fillStyle = p.color
+				ctx.shadowColor = p.color
+				ctx.shadowBlur = 10
+				ctx.fill()
+				ctx.shadowBlur = 0
+			}
+			ctx.restore()
+		},
+
+		// Demo simulation — fires random pulses when both demoMode & liveMode are on
+		startDemoSimulation() {
+			this.stopDemoSimulation()
+			const nonCtrl = this.nodes.filter((n) => !n.isControllerNode)
+			if (!nonCtrl.length) return
+
+			const COLORS = [
+				'#00BCD4',
+				'#F1C40F',
+				'#FF7043',
+				'#2DCC70',
+				'#7e57c2',
+				'#FF4081',
+			]
+			const LABELS = [
+				'Binary Switch',
+				'Multilevel Set',
+				'Scene Activation',
+				'Notification',
+				'Basic Set',
+				'Central Scene',
+			]
+
+			this.$options._demoInterval = setInterval(() => {
+				if (!this.network) return
+				const node = nonCtrl[Math.floor(Math.random() * nonCtrl.length)]
+				const color = COLORS[Math.floor(Math.random() * COLORS.length)]
+				const label = LABELS[Math.floor(Math.random() * LABELS.length)]
+				this.spawnPulsesForNode(node.id, color, label)
+			}, 1200)
+		},
+
+		stopDemoSimulation() {
+			if (this.$options._demoInterval) {
+				clearInterval(this.$options._demoInterval)
+				this.$options._demoInterval = null
+			}
+		},
+
+		// ── Replay ────────────────────────────────────────────────────────────
+
+		async replayGroupFlow() {
+			if (this.replaying || !this.network) return
+			this.replaying = true
+			this.pulses = []
+
+			const { groups } = this.buildGroupData()
+			// Only groups with real non-controller members
+			const active = groups.filter((g) =>
+				g.members.some((m) => m.nodeId !== 1),
+			)
+
+			if (!active.length) {
+				this.replaying = false
+				return
+			}
+
+			const COLORS = [
+				'#00BCD4',
+				'#2DCC70',
+				'#F1C40F',
+				'#FF7043',
+				'#7e57c2',
+			]
+			const delay = (ms) => new Promise((r) => setTimeout(r, ms))
+			const PULSE_DURATION = 1000 / 0.013 // ~77 frames at 60fps ≈ 1.3s
+
+			for (let i = 0; i < active.length; i++) {
+				if (!this.replaying) break
+				const g = active[i]
+				const color = COLORS[i % COLORS.length]
+				const srcName = this.getNodeName(g.nodeId)
+				this.replayLabel = `${srcName} → ${g.title}`
+
+				const srcPos = this.getNodeCanvasPos(`node_${g.nodeId}`)
+				const grpPos = this.getNodeCanvasPos(g.groupKey)
+				if (!srcPos || !grpPos) continue
+
+				// Phase 1: source node → group diamond
+				await new Promise((resolve) => {
+					this.pulses.push({
+						from: { ...srcPos },
+						to: { ...grpPos },
+						progress: 0,
+						color,
+						onComplete: resolve,
+					})
+				})
+
+				// Phase 2: group diamond → each member (all at once)
+				const memberPromises = g.members.map((m) => {
+					return new Promise((resolve) => {
+						const mPos = this.getNodeCanvasPos(`node_${m.nodeId}`)
+						if (!mPos) {
+							resolve()
+							return
+						}
+						this.pulses.push({
+							from: { ...grpPos },
+							to: { ...mPos },
+							progress: 0,
+							color,
+							onComplete: resolve,
+						})
+					})
+				})
+				await Promise.all(memberPromises)
+
+				// Brief pause between groups
+				await delay(300)
+			}
+
+			this.replayLabel = ''
+			this.replaying = false
+		},
+
+		// ── Data ─────────────────────────────────────────────────────────────
 
 		// Build a flat list of group objects:
 		// { groupKey, nodeId, groupId, endpoint, title, maxNodes, multiChannel, isLifeline, members[] }
@@ -1056,6 +1490,13 @@ export default {
 				this.network.setOptions({ physics: { enabled: false } })
 			})
 
+			// Pulse rendering — draw on vis-network's own canvas each frame
+			this.network.on('afterDrawing', (ctx) => {
+				this.renderPulses(ctx)
+			})
+
+			this.startAnimation()
+
 			this.network.on('hoverNode', (params) => {
 				if (this.hoverTimeout) clearTimeout(this.hoverTimeout)
 				const nodeData = visNodes.get(params.node)
@@ -1158,5 +1599,19 @@ export default {
 <style scoped>
 .fill-height {
 	height: 100%;
+}
+
+.animate-pulse-chip {
+	animation: chip-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes chip-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.5;
+	}
 }
 </style>

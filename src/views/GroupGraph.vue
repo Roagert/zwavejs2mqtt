@@ -15,7 +15,7 @@ import { mapState } from 'pinia'
 import useBaseStore from '../stores/base.js'
 
 export default {
-	name: 'GroupGraph',
+	name: 'GroupGraphView',
 	props: {
 		socket: Object,
 	},
