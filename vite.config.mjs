@@ -128,7 +128,7 @@ export default defineConfig(({ mode }) => {
 				},
 				{
 					find: /^@server\/(.+)/,
-					replacement: `${path.resolve(__dirname, 'server')}/$1`,
+					replacement: `${path.resolve(__dirname, 'api')}/$1`,
 				},
 			],
 			preserveSymlinks: true,
@@ -165,6 +165,10 @@ export default defineConfig(({ mode }) => {
 					target: proxyURL,
 					secure: false,
 					changeOrigin: true,
+					bypass: (req) => {
+						// Don't proxy local TypeScript source files (e.g. @server alias resolves to /api/lib/*.ts)
+						if (req.url && req.url.endsWith('.ts')) return req.url
+					},
 					...headers,
 				},
 			},
