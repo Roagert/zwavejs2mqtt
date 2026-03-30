@@ -732,59 +732,55 @@ export default {
 		},
 
 		loadDemoAssociations() {
-			// Build rich synthetic associations using the real node list so
-			// names / IDs remain accurate, only the cross-node wiring is fictional.
+			// Pick 6 real nodes to keep the demo small and easy to read.
 			const nonCtrl = this.nodes.filter((n) => !n.isControllerNode)
 			if (nonCtrl.length < 3) return
 
+			// Take up to 6 evenly-spaced nodes from the real list
+			const step = Math.max(1, Math.floor(nonCtrl.length / 6))
+			const sample = []
+			for (
+				let i = 0;
+				i < nonCtrl.length && sample.length < 6;
+				i += step
+			) {
+				sample.push(nonCtrl[i])
+			}
+
+			// Fixed wiring: A→B, B→C, C→D, A→D, E→B, E→C (a small hub-spoke + ring)
+			// Only these 6 nodes appear; every other node gets no associations.
+			const [A, B, C, D, E, F] = sample
+			const assoc = (nodeId, groupId, targetId) => ({
+				endpoint: 0,
+				groupId,
+				nodeId: targetId,
+				targetEndpoint: 0,
+			})
+
 			const demo = {}
 
-			// Helper – pick N unique random nodes excluding `self`
-			const pick = (self, n) => {
-				const pool = nonCtrl
-					.filter((x) => x.id !== self)
-					.map((x) => x.id)
-				const out = []
-				while (out.length < n && pool.length > 0) {
-					const idx = Math.floor(Math.random() * pool.length)
-					out.push(pool.splice(idx, 1)[0])
-				}
-				return out
+			// All nodes report lifeline to controller
+			for (const n of sample) {
+				demo[n.id] = [assoc(n.id, 1, 1)]
 			}
 
-			for (const node of nonCtrl) {
-				const assocs = []
-				const groups = node.groups || []
+			// A controls B and D
+			if (A && B) demo[A.id].push(assoc(A.id, 2, B.id))
+			if (A && D) demo[A.id].push(assoc(A.id, 3, D.id))
 
-				// Group 1 – Lifeline always points to controller
-				assocs.push({
-					endpoint: 0,
-					groupId: 1,
-					nodeId: 1,
-					targetEndpoint: 0,
-				})
+			// B controls C
+			if (B && C) demo[B.id].push(assoc(B.id, 2, C.id))
 
-				// Remaining groups: wire 1-3 random peers into some of them
-				for (const g of groups.slice(1, 6)) {
-					// ~60 % chance a group has non-lifeline members
-					if (Math.random() < 0.6) {
-						const targets = pick(
-							node.id,
-							Math.ceil(Math.random() * 2),
-						)
-						for (const t of targets) {
-							assocs.push({
-								endpoint: g.endpoint ?? 0,
-								groupId: g.value,
-								nodeId: t,
-								targetEndpoint: 0,
-							})
-						}
-					}
-				}
+			// C loops back to A (creates a ring A→B→C→A)
+			if (C && A) demo[C.id].push(assoc(C.id, 2, A.id))
 
-				demo[node.id] = assocs
-			}
+			// E is a hub that controls both B and C
+			if (E && B) demo[E.id].push(assoc(E.id, 2, B.id))
+			if (E && C) demo[E.id].push(assoc(E.id, 3, C.id))
+
+			// F bridges to D and E
+			if (F && D) demo[F.id].push(assoc(F.id, 2, D.id))
+			if (F && E) demo[F.id].push(assoc(F.id, 3, E.id))
 
 			this.associationsMap = demo
 			this.paintGraph()
@@ -978,8 +974,14 @@ export default {
 		// Demo simulation — fires random pulses when both demoMode & liveMode are on
 		startDemoSimulation() {
 			this.stopDemoSimulation()
-			const nonCtrl = this.nodes.filter((n) => !n.isControllerNode)
-			if (!nonCtrl.length) return
+
+			// Only fire from the small demo node set (nodes that actually have
+			// cross-associations in the current associationsMap)
+			const activeNodeIds = Object.entries(this.associationsMap)
+				.filter(([, assocs]) => assocs.some((a) => a.nodeId !== 1))
+				.map(([id]) => parseInt(id))
+
+			if (!activeNodeIds.length) return
 
 			const COLORS = [
 				'#00BCD4',
@@ -987,7 +989,6 @@ export default {
 				'#FF7043',
 				'#2DCC70',
 				'#7e57c2',
-				'#FF4081',
 			]
 			const LABELS = [
 				'Binary Switch',
@@ -995,16 +996,18 @@ export default {
 				'Scene Activation',
 				'Notification',
 				'Basic Set',
-				'Central Scene',
 			]
 
+			let idx = 0
 			this.$options._demoInterval = setInterval(() => {
 				if (!this.network) return
-				const node = nonCtrl[Math.floor(Math.random() * nonCtrl.length)]
-				const color = COLORS[Math.floor(Math.random() * COLORS.length)]
-				const label = LABELS[Math.floor(Math.random() * LABELS.length)]
-				this.spawnPulsesForNode(node.id, color, label)
-			}, 1200)
+				// Cycle through active nodes in order so it's predictable
+				const nodeId = activeNodeIds[idx % activeNodeIds.length]
+				idx++
+				const color = COLORS[idx % COLORS.length]
+				const label = LABELS[idx % LABELS.length]
+				this.spawnPulsesForNode(nodeId, color, label)
+			}, 1800)
 		},
 
 		stopDemoSimulation() {
