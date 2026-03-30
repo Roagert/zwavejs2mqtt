@@ -1317,6 +1317,9 @@ class ZwaveClient extends TypedEventEmitter<ZwaveClientEventCallbacks> {
 			error: this.error,
 			cntStatus: this.cntStatus,
 			inclusionState: this._inclusionState,
+			associations: this.homeHex
+				? ((jsonStore.get(store.associations) as any)?.[this.homeHex] ?? {})
+				: {},
 		}
 	}
 
@@ -1817,6 +1820,7 @@ class ZwaveClient extends TypedEventEmitter<ZwaveClientEventCallbacks> {
 	): Promise<ZUIGroupAssociation[]> {
 		const zwaveNode = this.getNode(nodeId)
 		const toReturn: ZUIGroupAssociation[] = []
+		let fetchSucceeded = false
 
 		if (zwaveNode) {
 			try {
@@ -1842,6 +1846,7 @@ class ZwaveClient extends TypedEventEmitter<ZwaveClientEventCallbacks> {
 						}
 					}
 				}
+				fetchSucceeded = true
 			} catch (error) {
 				this.logNode(
 					zwaveNode,
@@ -1858,7 +1863,43 @@ class ZwaveClient extends TypedEventEmitter<ZwaveClientEventCallbacks> {
 			)
 		}
 
+		// Persist to associations.json whenever a successful fetch is made
+		if (fetchSucceeded) {
+			void this._saveAssociationCache(nodeId, toReturn)
+		}
+
 		return toReturn
+	}
+
+	/** Save one node's associations to the persistent cache */
+	private async _saveAssociationCache(
+		nodeId: number,
+		associations: ZUIGroupAssociation[],
+	): Promise<void> {
+		if (!this.homeHex) return
+		try {
+			const cache = (jsonStore.get(store.associations) ?? {}) as Record<
+				string,
+				Record<string, ZUIGroupAssociation[]>
+			>
+			if (!cache[this.homeHex]) cache[this.homeHex] = {}
+			cache[this.homeHex][String(nodeId)] = associations
+			await jsonStore.put(store.associations, cache)
+		} catch (error) {
+			logger.warn(`Error saving associations cache: ${error.message}`)
+		}
+	}
+
+	/** Fetch and cache a single node's associations, then push the update to all clients */
+	private async _refreshAndEmitAssociations(nodeId: number): Promise<void> {
+		try {
+			const associations = await this.getAssociations(nodeId, false)
+			// getAssociations already calls _saveAssociationCache on success
+			this.sendToSocket(socketEvents.associationsUpdated, {
+				nodeId,
+				associations,
+			})
+		} catch { /* ignore */ }
 	}
 
 	/**
@@ -6381,6 +6422,8 @@ class ZwaveClient extends TypedEventEmitter<ZwaveClientEventCallbacks> {
 
 		this.getGroups(zwaveNode.id, true)
 
+		void this._refreshAndEmitAssociations(zwaveNode.id)
+
 		this._onNodeStatus(zwaveNode)
 
 		// Check for matching configuration templates
@@ -6590,6 +6633,10 @@ class ZwaveClient extends TypedEventEmitter<ZwaveClientEventCallbacks> {
 			'node alive',
 			this.zwaveNodeToJSON(zwaveNode),
 		)
+
+		// Refresh associations now that the node is reachable — this also updates
+		// associations.json and pushes ASSOCIATIONS_UPDATED to all clients
+		void this._refreshAndEmitAssociations(zwaveNode.id)
 	}
 
 	/**

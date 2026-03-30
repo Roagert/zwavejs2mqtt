@@ -545,7 +545,7 @@ export default {
 
 				pages.push({
 					icon: 'hub',
-					title: 'Group graph',
+					title: 'Association Graph',
 					path: Routes.groupGraph,
 				})
 			}
@@ -852,6 +852,7 @@ export default {
 			'updateNode',
 			'removeNode',
 			'setZnifferState',
+			'setAssociations',
 		]),
 		copyVersion() {
 			const el = document.createElement('textarea')
@@ -1321,6 +1322,10 @@ export default {
 			})
 			// convert node values in array
 			this.initNodes(data.nodes)
+			// load cached associations (bulk init)
+			if (data.associations) {
+				this.setAssociations(data.associations)
+			}
 
 			// Handle debug capture state persistence — only update when
 			// explicitly provided (server-pushed inits from ZwaveClient
@@ -1460,6 +1465,12 @@ export default {
 				socketEvents.otwFirmwareUpdate,
 				this.onOTWFirmwareUpdate.bind(this),
 			)
+
+			this.socket.on(
+				socketEvents.associationsUpdated,
+				this.setAssociations.bind(this),
+			)
+
 			// don't await this, will cause a loop of calls
 			this.getConfig()
 		},

@@ -4,6 +4,7 @@
 			ref="mesh"
 			id="mesh"
 			:nodes="nodes"
+			:socket="socket"
 			@node-click="nodeClick"
 			@node-added="fetchNodeRoutes"
 			@node-removed="onNodeRemoved"

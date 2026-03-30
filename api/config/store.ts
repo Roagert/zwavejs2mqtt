@@ -12,6 +12,7 @@ export type StoreKeys =
 	| 'nodes'
 	| 'users'
 	| 'configurationTemplates'
+	| 'associations'
 
 export interface StoreFile {
 	file: string
@@ -57,6 +58,11 @@ const store: Record<StoreKeys, StoreFile> = {
 	configurationTemplates: {
 		file: 'configurationTemplates.json',
 		default: [],
+	},
+	associations: {
+		file: 'associations.json',
+		// { "<homeHex>": { "<nodeId>": [ZUIGroupAssociation] } }
+		default: {},
 	},
 }
 

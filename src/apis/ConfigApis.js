@@ -76,6 +76,19 @@ export default {
 				response,
 			)
 		}
+		if (!response.ok) {
+			throw new axios.AxiosError(
+				`auth-enabled request failed with status ${response.status}`,
+				response.status,
+			)
+		}
+		const contentType = response.headers.get('content-type') || ''
+		if (!contentType.includes('application/json')) {
+			throw new axios.AxiosError(
+				`auth-enabled returned non-JSON response (${contentType})`,
+				response.status,
+			)
+		}
 		return await response.json()
 	},
 	// ---- USER ------

@@ -23,6 +23,7 @@ export enum socketEvents {
 	znifferState = 'ZNIFFER_STATE',
 	linkReliability = 'LINK_RELIABILITY',
 	otwFirmwareUpdate = 'OTW_FIRMWARE_UPDATE',
+	associationsUpdated = 'ASSOCIATIONS_UPDATED',
 }
 
 // events from client ---> server
@@ -52,6 +53,7 @@ export const channelMap: Record<string, socketEvents[]> = {
 		socketEvents.grantSecurityClasses,
 		socketEvents.validateDSK,
 		socketEvents.inclusionAborted,
+		socketEvents.associationsUpdated,
 	],
 	values: [
 		socketEvents.valueUpdated,

@@ -115,6 +115,7 @@ const useBaseStore = defineStore('base', {
 			convertRSSI: false,
 			defaultFrequency: undefined,
 		},
+		associationsMap: {}, // { [nodeId]: ZUIGroupAssociation[] }
 		devices: [],
 		gateway: {
 			type: 0,
@@ -506,6 +507,16 @@ const useBaseStore = defineStore('base', {
 					errorReceive,
 					errorTransmit,
 				})
+			}
+		},
+		setAssociations(data) {
+			if (!data) return
+			// Bulk init: { [nodeId]: associations[] }
+			if (typeof data === 'object' && !data.nodeId) {
+				this.associationsMap = { ...data }
+			} else {
+				// Incremental update: { nodeId, associations }
+				this.associationsMap[String(data.nodeId)] = data.associations
 			}
 		},
 		setRebuildRoutesProgress(nodesProgress) {

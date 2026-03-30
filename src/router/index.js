@@ -142,7 +142,7 @@ const router = createRouter({
 		},
 		{
 			path: Routes.groupGraph,
-			name: 'Group Graph',
+			name: 'Association Graph',
 			component: GroupGraph,
 			props: true,
 			meta: {

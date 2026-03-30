@@ -36,6 +36,9 @@
 								density="compact"
 								color="primary"
 							>
+								<v-btn value="associations" size="small"
+									>Devices</v-btn
+								>
 								<v-btn value="groups" size="small"
 									>Groups</v-btn
 								>
@@ -43,7 +46,7 @@
 									>Node→Groups</v-btn
 								>
 								<v-btn value="shared" size="small"
-									>Shared Nodes</v-btn
+									>Shared</v-btn
 								>
 							</v-btn-toggle>
 
@@ -368,125 +371,184 @@
 			</v-menu>
 		</v-col>
 
-		<!-- Selected item detail panel -->
-		<v-bottom-sheet v-model="showDetail" scrollable>
-			<v-card>
-				<v-card-title class="d-flex justify-space-between align-center">
-					<span>{{ selectedDetail?.label }}</span>
-					<v-btn
-						icon="close"
-						variant="text"
-						@click="showDetail = false"
-					/>
-				</v-card-title>
-				<v-card-text v-if="selectedDetail">
-					<template v-if="selectedDetail.type === 'group'">
-						<v-list density="compact">
-							<v-list-item
-								>Source Node:
-								<strong>{{
-									selectedDetail.sourceNodeName
-								}}</strong></v-list-item
-							>
-							<v-list-item
-								>Group ID:
-								<strong>{{
-									selectedDetail.groupId
-								}}</strong></v-list-item
-							>
-							<v-list-item
-								>Max Members:
-								<strong>{{
-									selectedDetail.maxNodes
-								}}</strong></v-list-item
-							>
-							<v-list-item v-if="selectedDetail.isLifeline">
-								<template #prepend
-									><v-icon color="amber"
-										>star</v-icon
-									></template
-								>
-								Lifeline group
-							</v-list-item>
-						</v-list>
-						<v-divider class="my-2" />
-						<div class="text-subtitle-2 mb-1">
-							Members ({{ selectedDetail.members?.length || 0 }})
-						</div>
-						<v-chip
-							v-for="m in selectedDetail.members"
-							:key="m.nodeId"
-							class="mr-1 mb-1"
-							:color="getNodeStatusColor(m.nodeId)"
-							size="small"
-						>
-							{{ getNodeName(m.nodeId) }} ({{ m.nodeId }})
-							<span
-								v-if="
-									m.endpoint !== undefined && m.endpoint >= 0
-								"
-							>
-								ep{{ m.endpoint }}</span
-							>
-						</v-chip>
-					</template>
+		<!-- Association Management Panel -->
+		<v-navigation-drawer
+			v-model="showManagePanel"
+			location="right"
+			width="360"
+			temporary
+		>
+			<v-toolbar density="compact" color="surface">
+				<v-toolbar-title class="text-body-1 font-weight-bold">
+					{{ managePanelNode?.name || managePanelNode?._name || ('Node ' + managePanelNode?.id) }}
+					<v-chip size="x-small" class="ml-1" color="secondary" variant="tonal">ID {{ managePanelNode?.id }}</v-chip>
+				</v-toolbar-title>
+				<v-btn icon="close" variant="text" @click="showManagePanel = false" />
+			</v-toolbar>
 
-					<template v-else-if="selectedDetail.type === 'node'">
-						<v-list density="compact">
-							<v-list-item
-								>Node ID:
-								<strong>{{
-									selectedDetail.nodeId
-								}}</strong></v-list-item
-							>
-							<v-list-item>
-								Status:
-								<strong
-									:style="{
-										color: getNodeStatusColor(
-											selectedDetail.nodeId,
-										),
-									}"
-									>{{ selectedDetail.status }}</strong
-								>
-							</v-list-item>
-						</v-list>
-						<v-divider class="my-2" />
-						<div class="text-subtitle-2 mb-1">
-							Groups defined by this node ({{
-								selectedDetail.groups?.length || 0
-							}})
-						</div>
-						<v-chip
-							v-for="g in selectedDetail.groups"
-							:key="g.groupKey"
-							class="mr-1 mb-1"
-							color="primary"
-							variant="tonal"
-							size="small"
-						>
+			<v-list-subheader class="mt-2">
+				Status:
+				<strong :style="{ color: managePanelNode ? getNodeStatusColor(managePanelNode.id) : '' }">
+					{{ managePanelNode ? getNodeStatus(managePanelNode.id) : '' }}
+				</strong>
+			</v-list-subheader>
+
+			<v-divider />
+
+			<div v-if="managePanelLoading" class="text-center pa-4">
+				<v-progress-circular indeterminate color="primary" size="24" />
+				<div class="text-caption mt-1">Loading associations…</div>
+			</div>
+
+			<template v-else-if="managePanelGroups.length">
+				<v-list-subheader>
+					Association Groups ({{ managePanelGroupsFiltered.length }}<span v-if="managePanelHiddenCount" class="text-disabled">/{{ managePanelGroups.length }}</span>)
+					<v-tooltip location="bottom">
+						<template #activator="{ props }">
+							<v-btn
+								v-bind="props"
+								:icon="showEmptyGroups ? 'visibility' : 'visibility_off'"
+								size="x-small"
+								variant="text"
+								class="ml-1"
+								@click="showEmptyGroups = !showEmptyGroups"
+							/>
+						</template>
+						{{ showEmptyGroups ? 'Hide empty groups' : `Show ${managePanelHiddenCount} empty group(s)` }}
+					</v-tooltip>
+					<v-btn
+						icon="refresh"
+						size="x-small"
+						variant="text"
+						class="ml-1"
+						@click="refreshManagePanel"
+					/>
+				</v-list-subheader>
+
+				<div v-if="!managePanelGroupsFiltered.length" class="text-center text-disabled text-caption pa-2">
+					All groups are empty.
+					<a style="cursor:pointer" @click="showEmptyGroups = true">Show them</a>
+				</div>
+
+				<v-expansion-panels variant="accordion" density="compact">
+					<v-expansion-panel
+						v-for="g in managePanelGroupsFiltered"
+						:key="g.groupKey"
+					>
+						<v-expansion-panel-title density="compact" class="text-caption">
+							<v-icon
+								:color="g.isLifeline ? 'amber' : 'primary'"
+								size="small"
+								class="mr-1"
+							>{{ g.isLifeline ? 'star' : 'hub' }}</v-icon>
 							{{ g.title }}
-						</v-chip>
-						<v-divider class="my-2" />
-						<div class="text-subtitle-2 mb-1">
-							Member of groups ({{
-								selectedDetail.memberships?.length || 0
-							}})
-						</div>
-						<v-chip
-							v-for="m in selectedDetail.memberships"
-							:key="m.groupKey"
-							class="mr-1 mb-1"
-							color="secondary"
-							variant="tonal"
-							size="small"
-						>
-							{{ m.sourceNodeName }} – {{ m.title }}
-						</v-chip>
-					</template>
-				</v-card-text>
-			</v-card>
-		</v-bottom-sheet>
+							<v-chip size="x-small" class="ml-2" variant="outlined">
+								{{ g.members.length }}/{{ g.maxNodes || '?' }}
+							</v-chip>
+							<v-chip
+								v-if="g.hasDeadMember"
+								size="x-small"
+								color="error"
+								class="ml-1"
+							>dead</v-chip>
+						</v-expansion-panel-title>
+
+						<v-expansion-panel-text class="pa-0">
+							<!-- Members list -->
+							<v-list density="compact" class="pa-0">
+								<v-list-item
+									v-for="m in g.members"
+									:key="`${m.nodeId}-${m.targetEndpoint}`"
+									density="compact"
+									class="pl-3 pr-1"
+								>
+									<template #prepend>
+										<v-icon
+											size="small"
+											:color="isNodeDead(m.nodeId) ? 'error' : 'success'"
+										>circle</v-icon>
+									</template>
+									<v-list-item-title class="text-caption">
+										{{ getNodeName(m.nodeId) }}
+										<span class="text-disabled"> #{{ m.nodeId }}</span>
+										<span v-if="m.targetEndpoint > 0" class="text-disabled"> ep{{ m.targetEndpoint }}</span>
+									</v-list-item-title>
+									<template #append>
+										<v-btn
+											icon="close"
+											size="x-small"
+											variant="text"
+											color="error"
+											:loading="removeLoading[`${g.groupId}_${m.nodeId}_${m.targetEndpoint}`]"
+											@click.stop="removeMember(g, m)"
+										/>
+									</template>
+								</v-list-item>
+
+								<v-list-item
+									v-if="!g.members.length"
+									density="compact"
+									class="text-disabled text-caption pl-3"
+								>
+									No members
+								</v-list-item>
+							</v-list>
+
+							<!-- Add member -->
+							<div class="pa-2" v-if="!g.isLifeline || g.maxNodes > 1">
+								<v-autocomplete
+									v-model="addTargetNode[g.groupKey]"
+									:items="availableTargetNodes(g)"
+									item-title="_name"
+									item-value="id"
+									label="Add node…"
+									density="compact"
+									variant="outlined"
+									hide-details
+									clearable
+									class="text-caption"
+									@update:model-value="addMember(g, $event)"
+								/>
+							</div>
+						</v-expansion-panel-text>
+					</v-expansion-panel>
+				</v-expansion-panels>
+			</template>
+
+			<div v-else class="text-center text-disabled text-caption pa-4">
+				No association groups found for this node.
+			</div>
+
+			<!-- Incoming associations: other devices that control this node -->
+			<template v-if="managePanelIncoming.length">
+				<v-divider class="my-1" />
+				<v-list-subheader>
+					Controlled by ({{ managePanelIncoming.length }})
+				</v-list-subheader>
+				<v-list density="compact" class="pa-0">
+					<v-list-item
+						v-for="inc in managePanelIncoming"
+						:key="inc.nodeId"
+						density="compact"
+						class="pl-3"
+					>
+						<template #prepend>
+							<v-icon
+								size="small"
+								:color="isNodeDead(inc.nodeId) ? 'error' : 'info'"
+							>arrow_forward</v-icon>
+						</template>
+						<v-list-item-title class="text-caption">
+							{{ getNodeName(inc.nodeId) }}
+							<span class="text-disabled"> #{{ inc.nodeId }}</span>
+						</v-list-item-title>
+						<v-list-item-subtitle class="text-caption">
+							{{ inc.groups.map(g => g.groupTitle).join(', ') }}
+						</v-list-item-subtitle>
+					</v-list-item>
+				</v-list>
+			</template>
+		</v-navigation-drawer>
 	</div>
 </template>
 
@@ -494,7 +556,7 @@
 import { Network } from 'vis-network'
 import { DataSet } from 'vis-data'
 import 'vis-network/styles/vis-network.css'
-import { mapState } from 'pinia'
+import { mapActions, mapState } from 'pinia'
 import useBaseStore from '../../stores/base.js'
 import InstancesMixin from '../../mixins/InstancesMixin.js'
 
@@ -513,7 +575,7 @@ const GROUP_LIFELINE_COLOR = '#7e57c2'
 const SHARED_NODE_COLOR = '#00BCD4'
 
 export default {
-	name: 'GroupGraph',
+	name: 'AssociationGraph',
 	mixins: [InstancesMixin],
 	props: {
 		nodes: {
@@ -523,12 +585,50 @@ export default {
 		socket: Object,
 	},
 	computed: {
-		...mapState(useBaseStore, ['controllerNode', 'nodesMap']),
+		...mapState(useBaseStore, {
+			controllerNode: 'controllerNode',
+			nodesMap: 'nodesMap',
+			storeAssociationsMap: 'associationsMap',
+		}),
 		fontColor() {
 			return this.$vuetify.theme.current.dark ? '#ddd' : '#333'
 		},
 		isDark() {
 			return this.$vuetify.theme.current.dark
+		},
+		managePanelIncoming() {
+			if (!this.managePanelNode) return []
+			const targetId = this.managePanelNode.id
+			const result = []
+			for (const [srcNodeIdStr, assocs] of Object.entries(this.associationsMap)) {
+				const srcNodeId = Number(srcNodeIdStr)
+				if (srcNodeId === targetId) continue
+				const matchingGroups = {}
+				for (const a of (assocs || [])) {
+					if (a.nodeId === targetId) {
+						const key = `ep${a.endpoint}_g${a.groupId}`
+						if (!matchingGroups[key]) {
+							matchingGroups[key] = {
+								endpoint: a.endpoint,
+								groupId: a.groupId,
+								groupTitle: this.getGroupTitle(srcNodeId, a.endpoint, a.groupId),
+							}
+						}
+					}
+				}
+				const groups = Object.values(matchingGroups)
+				if (groups.length > 0) {
+					result.push({ nodeId: srcNodeId, groups })
+				}
+			}
+			return result
+		},
+		managePanelGroupsFiltered() {
+			if (this.showEmptyGroups) return this.managePanelGroups
+			return this.managePanelGroups.filter((g) => g.members.length > 0)
+		},
+		managePanelHiddenCount() {
+			return this.managePanelGroups.length - this.managePanelGroupsFiltered.length
 		},
 	},
 	network: null,
@@ -540,18 +640,26 @@ export default {
 			containerHeight: 400,
 			loading: false,
 			loadProgress: '',
-			viewMode: 'groups',
+			viewMode: 'associations',
 			layoutMode: 'force',
 			showDeadOnly: false,
 			showLifelineGroups: true,
 			showEmptyGroups: false,
 			showMenu: false,
 			menuX: 0,
+			// Management panel
+			showManagePanel: false,
+			managePanelNode: null,
+			managePanelGroups: [],
+			managePanelLoading: false,
+			addTargetNode: {},
+			removeLoading: {},
 			menuY: 0,
 			hoverItem: null,
 			hoverTimeout: null,
 			showDetail: false,
-			selectedDetail: null,
+			selectedDetail: null, // kept for group-view diamond clicks
+			dragging: false,
 			demoMode: false,
 			liveMode: false,
 			replaying: false,
@@ -632,16 +740,36 @@ export default {
 			if (
 				val &&
 				val.length > 0 &&
-				Object.keys(this.associationsMap).length === 0
+				Object.keys(this.associationsMap).length === 0 &&
+				Object.keys(this.storeAssociationsMap).length === 0 &&
+				!this.loading  // don't trigger a second load while one is already in progress
 			) {
 				this.loadAllAssociations()
 			} else {
+				// merge any newly-arrived store data into local map then repaint
+				Object.assign(this.associationsMap, this.storeAssociationsMap)
 				this.paintGraph()
 			}
 		},
+		storeAssociationsMap: {
+			deep: true,
+			handler(val) {
+				if (val && Object.keys(val).length > 0) {
+					Object.assign(this.associationsMap, val)
+					this.paintGraph()
+				}
+			},
+		},
 	},
 	mounted() {
-		if (this.nodes && this.nodes.length > 0) {
+		// Use cached associations from store if available, skip the heavy API load
+		if (
+			this.storeAssociationsMap &&
+			Object.keys(this.storeAssociationsMap).length > 0
+		) {
+			Object.assign(this.associationsMap, this.storeAssociationsMap)
+			this.$nextTick(() => this.paintGraph())
+		} else if (this.nodes && this.nodes.length > 0) {
 			this.loadAllAssociations()
 		}
 	},
@@ -652,6 +780,7 @@ export default {
 		if (this.hoverTimeout) clearTimeout(this.hoverTimeout)
 	},
 	methods: {
+		...mapActions(useBaseStore, ['setAssociations']),
 		onResize() {
 			this.containerHeight = this.$refs.container.$el.offsetHeight
 			const maxHeight = window.innerHeight - 180
@@ -666,7 +795,25 @@ export default {
 				this.network = null
 				if (this.$refs.content) this.$refs.content.innerHTML = ''
 			}
+			// Resolve any pending pulse promises so async flows (e.g. replayGroupFlow) don't hang
+			for (const p of this.pulses) {
+				if (p.onComplete) p.onComplete()
+			}
 			this.pulses = []
+			this.replaying = false
+		},
+		stabilizeGraph() {
+			if (!this.network) return
+			this.network.setOptions({
+				physics: {
+					enabled: true,
+					stabilization: { fit: false },
+				},
+			})
+			this.network.once('stabilizationIterationsDone', () => {
+				this.network.setOptions({ physics: false })
+			})
+			this.network.stabilize()
 		},
 		getNodeName(nodeId) {
 			const idx = this.nodesMap.get(nodeId)
@@ -685,6 +832,13 @@ export default {
 			const status = this.getNodeStatus(nodeId)
 			return NODE_STATUS_COLORS[status] || '#666666'
 		},
+		getGroupTitle(nodeId, endpoint, groupId) {
+			const idx = this.nodesMap.get(nodeId)
+			const node = idx !== undefined ? this.nodes[idx] : null
+			if (!node || !node.groups) return `Group ${groupId}`
+			const g = node.groups.find(g => g.value === groupId && g.endpoint === endpoint)
+			return g?.title || `Group ${groupId}`
+		},
 		isNodeDead(nodeId) {
 			const idx = this.nodesMap.get(nodeId)
 			const node = idx !== undefined ? this.nodes[idx] : null
@@ -699,13 +853,22 @@ export default {
 				(n) => !n.isControllerNode,
 			)
 
+			// Timeout sentinel so a hung socket call never blocks the whole load
+			const withTimeout = (promise, ms) =>
+				Promise.race([
+					promise,
+					new Promise((resolve) =>
+						setTimeout(() => resolve({ success: false }), ms),
+					),
+				])
+
 			for (let i = 0; i < nonControllerNodes.length; i++) {
 				const node = nonControllerNodes[i]
 				this.loadProgress = `${i + 1} / ${nonControllerNodes.length} nodes`
 				try {
-					const response = await this.app.apiRequest(
-						'getAssociations',
-						[node.id, false],
+					const response = await withTimeout(
+						this.app.apiRequest('getAssociations', [node.id, false]),
+						5000,
 					)
 					if (response.success) {
 						this.associationsMap[node.id] = response.result
@@ -717,6 +880,8 @@ export default {
 
 			this.loading = false
 			this.loadProgress = ''
+			// Persist to store so re-mounting the component uses cached data
+			this.setAssociations(this.associationsMap)
 			this.paintGraph()
 		},
 
@@ -801,6 +966,8 @@ export default {
 
 		setupLiveEvents() {
 			if (!this.socket) return
+			// Guard: never register the same handlers twice
+			this.teardownLiveEvents()
 			this.socket.on('VALUE_UPDATED', this._onValueUpdated)
 			this.socket.on('NODE_EVENT', this._onNodeEvent)
 		},
@@ -816,6 +983,12 @@ export default {
 			if (!this.liveMode || !this.network) return
 			const nodeId = data?.nodeId ?? data?.id
 			if (!nodeId) return
+			// Throttle: Z-Wave fires many VALUE_UPDATED per action — one pulse per node per 500 ms
+			if (!this.$options._pulseThrottle) this.$options._pulseThrottle = {}
+			const now = Date.now()
+			if (now - (this.$options._pulseThrottle[nodeId] ?? 0) < 500) return
+			this.$options._pulseThrottle[nodeId] = now
+
 			// Choose colour by commandClassName
 			const cc = data?.commandClassName || ''
 			const color = cc.includes('Binary')
@@ -844,16 +1017,38 @@ export default {
 			const { groups } = this.buildGroupData()
 			const srcId = `node_${nodeId}`
 
+			const srcPos = this.getNodeCanvasPos(srcId)
+
+			// Always flash the source node to give instant feedback
+			if (srcPos) {
+				this.pulses.push({ type: 'flash', x: srcPos.x, y: srcPos.y, progress: 0, color })
+			}
+
+			let pulsesAdded = 0
+
 			// Groups owned by this node that have members → pulse outward
 			const ownedGroups = groups.filter(
 				(g) => g.nodeId === nodeId && g.members.length > 0,
 			)
 			for (const g of ownedGroups) {
 				const from = this.getNodeCanvasPos(srcId)
-				const mid = this.getNodeCanvasPos(g.groupKey)
-				if (!from || !mid) continue
+				if (!from) continue
 
-				// Phase 1: node → group diamond
+				const mid = this.getNodeCanvasPos(g.groupKey)
+
+				if (!mid) {
+					// Associations view — no diamonds: go direct node → each member
+					for (const m of g.members) {
+						const mPos = this.getNodeCanvasPos(`node_${m.nodeId}`)
+						if (!mPos) continue
+						pulsesAdded++
+						this.pulses.push({ from: { ...from }, to: { ...mPos }, progress: 0, color, label })
+					}
+					continue
+				}
+
+				pulsesAdded++
+				// Diamond view: Phase 1 node → group diamond
 				this.pulses.push({
 					from: { ...from },
 					to: { ...mid },
@@ -863,17 +1058,9 @@ export default {
 					onComplete: () => {
 						// Phase 2: group diamond → each member
 						for (const m of g.members) {
-							const mPos = this.getNodeCanvasPos(
-								`node_${m.nodeId}`,
-							)
+							const mPos = this.getNodeCanvasPos(`node_${m.nodeId}`)
 							if (!mPos) continue
-							this.pulses.push({
-								from: { ...mid },
-								to: { ...mPos },
-								progress: 0,
-								color,
-								label,
-							})
+							this.pulses.push({ from: { ...mid }, to: { ...mPos }, progress: 0, color, label })
 						}
 					},
 				})
@@ -889,6 +1076,7 @@ export default {
 				const grpPos = this.getNodeCanvasPos(g.groupKey)
 				const mPos = this.getNodeCanvasPos(srcId)
 				if (!grpPos || !mPos) continue
+				pulsesAdded++
 				this.pulses.push({
 					from: { ...grpPos },
 					to: { ...mPos },
@@ -896,6 +1084,16 @@ export default {
 					color: color + 'bb',
 					label,
 				})
+			}
+
+			// If the node isn't in the current view at all (srcPos null, pulsesAdded 0),
+			// flash any group diamonds belonging to this node that ARE in the graph
+			if (!srcPos && pulsesAdded === 0) {
+				for (const g of ownedGroups) {
+					const gPos = this.getNodeCanvasPos(g.groupKey)
+					if (!gPos) continue
+					this.pulses.push({ type: 'flash', x: gPos.x, y: gPos.y, progress: 0, color })
+				}
 			}
 		},
 
@@ -928,10 +1126,11 @@ export default {
 		},
 
 		advancePulses() {
-			const SPEED = 0.013
+			const TRAVEL_SPEED = 0.013
+			const FLASH_SPEED = 0.025
 			const next = []
 			for (const p of this.pulses) {
-				p.progress += SPEED
+				p.progress += p.type === 'flash' ? FLASH_SPEED : TRAVEL_SPEED
 				if (p.progress >= 1) {
 					if (p.onComplete) p.onComplete()
 				} else {
@@ -945,6 +1144,27 @@ export default {
 			if (!this.pulses.length) return
 			ctx.save()
 			for (const p of this.pulses) {
+				if (p.type === 'flash') {
+					// Expanding ring that fades out
+					const radius = p.progress * 50
+					const alpha = Math.max(0, 1 - p.progress)
+					const hex = Math.floor(alpha * 255).toString(16).padStart(2, '0')
+					ctx.beginPath()
+					ctx.arc(p.x, p.y, radius, 0, Math.PI * 2)
+					ctx.strokeStyle = p.color + hex
+					ctx.lineWidth = 3 * (1 - p.progress)
+					ctx.stroke()
+					// Inner fill pulse
+					const innerGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radius * 0.6)
+					innerGrad.addColorStop(0, p.color + Math.floor(alpha * 80).toString(16).padStart(2, '0'))
+					innerGrad.addColorStop(1, p.color + '00')
+					ctx.beginPath()
+					ctx.arc(p.x, p.y, radius * 0.6, 0, Math.PI * 2)
+					ctx.fillStyle = innerGrad
+					ctx.fill()
+					continue
+				}
+
 				const t = p.progress
 				const x = p.from.x + (p.to.x - p.from.x) * t
 				const y = p.from.y + (p.to.y - p.from.y) * t
@@ -1053,10 +1273,25 @@ export default {
 				this.replayLabel = `${srcName} → ${g.title}`
 
 				const srcPos = this.getNodeCanvasPos(`node_${g.nodeId}`)
-				const grpPos = this.getNodeCanvasPos(g.groupKey)
-				if (!srcPos || !grpPos) continue
+				if (!srcPos) continue
 
-				// Phase 1: source node → group diamond
+				const grpPos = this.getNodeCanvasPos(g.groupKey)
+
+				if (!grpPos) {
+					// Associations / no-diamond view: go directly node → each member
+					const memberPromises = g.members.map((m) =>
+						new Promise((resolve) => {
+							const mPos = this.getNodeCanvasPos(`node_${m.nodeId}`)
+							if (!mPos) { resolve(); return }
+							this.pulses.push({ from: { ...srcPos }, to: { ...mPos }, progress: 0, color, onComplete: resolve })
+						}),
+					)
+					await Promise.all(memberPromises)
+					await delay(300)
+					continue
+				}
+
+				// Diamond view: Phase 1 node → group diamond
 				await new Promise((resolve) => {
 					this.pulses.push({
 						from: { ...srcPos },
@@ -1170,6 +1405,10 @@ export default {
 			this.stats.deadNodes = this.nodes.filter((n) =>
 				this.isNodeDead(n.id),
 			).length
+			if (this.viewMode === 'associations') {
+				this.paintAssociationsView(groups, groupMemberships)
+				return
+			}
 
 			if (this.viewMode === 'groups') {
 				this.paintGroupsView(groups, groupMemberships)
@@ -1177,6 +1416,156 @@ export default {
 				this.paintNodesView(groups, groupMemberships)
 			} else {
 				this.paintSharedView(groups, groupMemberships)
+			}
+		},
+
+		// ── Associations view (node → node, all devices shown) ───────────────
+
+		paintAssociationsView(groups, groupMemberships) {
+			const visNodes = new DataSet()
+			const visEdges = new DataSet()
+
+			// Add ALL Z-Wave nodes (so animation always has a position)
+			const ctrlId = this.controllerNode?.id ?? 1
+			for (const node of this.nodes) {
+				const isDead = this.isNodeDead(node.id)
+				const memberships = groupMemberships[node.id] || []
+				const isShared = memberships.length > 1
+				const statusColor = this.getNodeStatusColor(node.id)
+				const color = isDead ? '#8b0000' : node.isControllerNode ? '#7e57c2' : isShared ? SHARED_NODE_COLOR : statusColor
+				const shape = node.isControllerNode ? 'star' : node.isListening === false ? 'square' : 'hexagon'
+				visNodes.add({
+					id: `node_${node.id}`,
+					label: node.isControllerNode ? 'Controller' : (isDead ? `⚠ ${this.getNodeName(node.id)}` : this.getNodeName(node.id)),
+					shape,
+					color: { background: color, border: color, highlight: { background: color, border: '#fff' } },
+					font: { color: isDead ? '#ff5252' : this.fontColor, size: 12, bold: isDead },
+					size: node.isControllerNode ? 22 : 16,
+					borderWidth: isDead ? 3 : 1,
+					_type: 'node',
+					_nodeId: node.id,
+					_status: this.getNodeStatus(node.id),
+					_groupCount: node.groups?.length || 0,
+					_groupMemberships: memberships,
+				})
+			}
+
+			// Build edge map: "${fromId}_${toId}" → [groupObj, ...]
+			const edgeMap = {}
+			for (const g of groups) {
+				if (!this.showLifelineGroups && g.isLifeline) continue
+				if (this.showDeadOnly && !g.hasDeadMember) continue
+				for (const m of g.members) {
+					const key = `${g.nodeId}_${m.nodeId}`
+					if (!edgeMap[key]) edgeMap[key] = { nodeId: g.nodeId, targetId: m.nodeId, groupList: [] }
+					edgeMap[key].groupList.push(g)
+				}
+			}
+
+			// Add one edge per (source, target) pair; label = group titles
+			for (const data of Object.values(edgeMap)) {
+				const allLifeline = data.groupList.every(g => g.isLifeline)
+				const hasDead = data.groupList.some(g => g.hasDeadMember)
+				const labels = data.groupList.map(g => g.title).join('\n')
+				const color = hasDead ? GROUP_DEAD_COLOR : allLifeline ? '#888888' : '#00BCD4'
+				visEdges.add({
+					id: `${data.nodeId}_${data.targetId}`,
+					from: `node_${data.nodeId}`,
+					to: `node_${data.targetId}`,
+					title: labels,   // shown on hover, no inline label
+					dashes: false,
+					color: { color, opacity: allLifeline ? 0.5 : 0.9 },
+					arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+					width: Math.min(data.groupList.length + 1, 4),
+					_type: 'association',
+					_groups: data.groupList,
+				})
+			}
+
+			this.createNetwork(visNodes, visEdges)
+		},
+
+		// ── Association management ────────────────────────────────────────────
+
+		async openManagePanel(nodeId) {
+			const idx = this.nodesMap.get(nodeId)
+			const node = idx !== undefined ? this.nodes[idx] : null
+			if (!node) return
+
+			this.managePanelNode = node
+			this.managePanelGroups = []
+			this.addTargetNode = {}
+			this.managePanelLoading = true
+			this.showManagePanel = true
+
+			try {
+				// Use refresh:false (controller cache) — no need to wake sleeping devices
+				const resp = await this.app.apiRequest('getAssociations', [nodeId, false])
+				if (resp.success) {
+					// Merge live associations into the node's group definitions
+					const liveAssocs = resp.result || []
+					const { groups } = this.buildGroupData()
+					this.managePanelGroups = (node.groups || []).map(g => {
+						const groupKey = `n${nodeId}_ep${g.endpoint}_g${g.value}`
+						const members = liveAssocs.filter(a => a.groupId === g.value && a.endpoint === g.endpoint)
+						const isLifeline = g.title?.toLowerCase().includes('lifeline') || g.value === 1
+						return {
+							groupKey,
+							groupId: g.value,
+							endpoint: g.endpoint,
+							title: g.title || `Group ${g.value}`,
+							maxNodes: g.maxNodes,
+							multiChannel: g.multiChannel,
+							isLifeline,
+							members,
+							hasDeadMember: members.some(m => this.isNodeDead(m.nodeId)),
+						}
+					})
+				}
+			} catch { /* silently ignore */ }
+			this.managePanelLoading = false
+		},
+
+		async refreshManagePanel() {
+			if (this.managePanelNode) {
+				await this.openManagePanel(this.managePanelNode.id)
+			}
+		},
+
+		availableTargetNodes(group) {
+			if (!this.managePanelNode) return []
+			const alreadyIn = new Set(group.members.map(m => m.nodeId))
+			return this.nodes.filter(n => !alreadyIn.has(n.id))
+		},
+
+		async addMember(group, targetNodeId) {
+			if (!targetNodeId || !this.managePanelNode) return
+			const source = { nodeId: this.managePanelNode.id, endpoint: group.endpoint ?? undefined }
+			const target = { nodeId: targetNodeId }
+			const resp = await this.app.apiRequest('addAssociations', [source, group.groupId, [target]])
+			this.addTargetNode = { ...this.addTargetNode, [group.groupKey]: null }
+			if (resp.success) {
+				// Fetch fresh data once, update local cache, repaint, reopen panel
+				const fresh = await this.app.apiRequest('getAssociations', [this.managePanelNode.id, false])
+				if (fresh.success) this.associationsMap[this.managePanelNode.id] = fresh.result
+				this.paintGraph()
+				await this.openManagePanel(this.managePanelNode.id)
+			}
+		},
+
+		async removeMember(group, member) {
+			if (!this.managePanelNode) return
+			const key = `${group.groupId}_${member.nodeId}_${member.targetEndpoint}`
+			this.removeLoading = { ...this.removeLoading, [key]: true }
+			const source = { nodeId: this.managePanelNode.id, endpoint: group.endpoint ?? undefined }
+			const target = { nodeId: member.nodeId, endpoint: member.targetEndpoint >= 0 ? member.targetEndpoint : undefined }
+			const resp = await this.app.apiRequest('removeAssociations', [source, group.groupId, [target]])
+			this.removeLoading = { ...this.removeLoading, [key]: false }
+			if (resp.success) {
+				const fresh = await this.app.apiRequest('getAssociations', [this.managePanelNode.id, false])
+				if (fresh.success) this.associationsMap[this.managePanelNode.id] = fresh.result
+				this.paintGraph()
+				await this.openManagePanel(this.managePanelNode.id)
 			}
 		},
 
@@ -1254,7 +1643,7 @@ export default {
 						from: g.groupKey,
 						to: mId,
 						color: { color: edgeColor, opacity: 0.85 },
-						dashes: this.isNodeDead(m.nodeId) ? [5, 5] : false,
+						dashes: false,
 						arrows: { to: { enabled: true, scaleFactor: 0.5 } },
 						width: this.isNodeDead(m.nodeId) ? 2 : 1,
 						_type: 'member',
@@ -1315,7 +1704,7 @@ export default {
 						from: mId,
 						to: g.groupKey,
 						color: { color: edgeColor, opacity: 0.7 },
-						dashes: this.isNodeDead(m.nodeId),
+						dashes: false,
 						arrows: { to: { enabled: true, scaleFactor: 0.5 } },
 						width: 1,
 					})
@@ -1446,16 +1835,42 @@ export default {
 		createNetwork(visNodes, visEdges) {
 			if (!this.$refs.content) return
 
+			// Ensure EVERY Z-Wave node has a registered position so live animation
+			// always works, even for nodes hidden by filters (pure receivers, etc.)
+			for (const node of this.nodes) {
+				const vid = `node_${node.id}`
+				if (!visNodes.get(vid)) {
+					visNodes.add({
+						id: vid,
+						label: '',
+						shape: 'dot',
+						size: 4,
+						hidden: true,
+						physics: false,
+						x: 0,
+						y: 0,
+						_type: 'anchor',
+						_nodeId: node.id,
+					})
+				}
+			}
+
 			const isHierarchical = this.layoutMode === 'hierarchical'
 
 			const options = {
 				physics: {
 					enabled: !isHierarchical,
-					stabilization: { iterations: 150, fit: true },
+					stabilization: {
+						enabled: true,
+						iterations: 50,
+						updateInterval: 50,
+						onlyDynamicEdges: false,
+						fit: true,
+					},
 					barnesHut: {
-						gravitationalConstant: -8000,
-						centralGravity: 0.3,
-						springLength: 150,
+						theta: 0.99,
+						damping: 0.9,
+						avoidOverlap: 0.15,
 					},
 				},
 				layout: isHierarchical
@@ -1470,14 +1885,26 @@ export default {
 					: { hierarchical: false },
 				interaction: {
 					hover: true,
+					navigationButtons: true,
+					keyboard: true,
+					multiselect: true,
+					hideEdgesOnDrag: false,
+					hideEdgesOnZoom: false,
+					hideNodesOnDrag: false,
+					hoverConnectedEdges: false,
+					selectable: true,
+					selectConnectedEdges: false,
 					tooltipDelay: 0,
-					hideEdgesOnDrag: true,
+					zoomSpeed: 1,
+					zoomView: true,
 				},
 				nodes: {
-					borderWidth: 1,
+					borderWidth: 2,
+					widthConstraint: { maximum: 180 },
 					shadow: false,
 				},
 				edges: {
+					width: 2,
 					smooth: { type: 'dynamic' },
 					selectionWidth: 2,
 				},
@@ -1500,16 +1927,24 @@ export default {
 
 			this.startAnimation()
 
+			this.network.on('dragStart', () => {
+				this.dragging = true
+				this.network.setOptions({ physics: true })
+			})
+
+			this.network.on('dragEnd', () => {
+				this.dragging = false
+				this.stabilizeGraph()
+			})
+
 			this.network.on('hoverNode', (params) => {
+				if (this.dragging) return
 				if (this.hoverTimeout) clearTimeout(this.hoverTimeout)
 				const nodeData = visNodes.get(params.node)
 				if (!nodeData) return
 
-				const pos = this.network.canvasToDOM(
-					this.network.getPosition(params.node),
-				)
-				this.menuX = pos.x + 20
-				this.menuY = pos.y + 20
+				this.menuX = params.event.clientX + 5
+				this.menuY = params.event.clientY + 5
 
 				if (nodeData._type === 'group') {
 					const g = nodeData._groupData
@@ -1554,43 +1989,23 @@ export default {
 				const nodeData = visNodes.get(params.nodes[0])
 				if (!nodeData) return
 
-				if (nodeData._type === 'group') {
-					const g = nodeData._groupData
-					this.selectedDetail = {
-						type: 'group',
-						label: nodeData.label.replace('\n', ' – '),
-						groupId: g.groupId,
-						sourceNodeName: nodeData._sourceNodeName,
-						maxNodes: g.maxNodes,
-						isLifeline: g.isLifeline,
-						members: g.members,
-					}
-				} else {
+				// Open management panel for any node (including controller)
+				if (nodeData._type !== 'group') {
 					const nodeId = nodeData._nodeId
-					const idx = this.nodesMap.get(nodeId)
-					const node = idx !== undefined ? this.nodes[idx] : null
-					const { groups: allGroups } = this.buildGroupData()
+					if (nodeId) this.openManagePanel(nodeId)
+					return
+				}
 
-					this.selectedDetail = {
-						type: 'node',
-						label: nodeData.label,
-						nodeId,
-						status: nodeData._status,
-						groups:
-							node?.groups?.map((g) => ({
-								groupKey: `n${nodeId}_ep${g.endpoint}_g${g.value}`,
-								title: g.title || `Group ${g.value}`,
-							})) || [],
-						memberships: allGroups
-							.filter((g) =>
-								g.members.some((m) => m.nodeId === nodeId),
-							)
-							.map((g) => ({
-								groupKey: g.groupKey,
-								sourceNodeName: this.getNodeName(g.nodeId),
-								title: g.title,
-							})),
-					}
+				// Diamond group click (Groups view only) — show old detail sheet
+				const g = nodeData._groupData
+				this.selectedDetail = {
+					type: 'group',
+					label: nodeData.label.replace('\n', ' – '),
+					groupId: g.groupId,
+					sourceNodeName: nodeData._sourceNodeName,
+					maxNodes: g.maxNodes,
+					isLifeline: g.isLifeline,
+					members: g.members,
 				}
 				this.showDetail = true
 			})

@@ -1,6 +1,6 @@
 <template>
 	<v-container class="fill" fluid>
-		<group-graph
+		<association-graph
 			ref="groupGraph"
 			id="group-graph"
 			:nodes="nodes"
@@ -20,7 +20,7 @@ export default {
 		socket: Object,
 	},
 	components: {
-		GroupGraph: defineAsyncComponent(
+		AssociationGraph: defineAsyncComponent(
 			() => import('@/components/custom/GroupGraph.vue'),
 		),
 	},

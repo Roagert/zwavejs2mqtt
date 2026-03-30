@@ -167,7 +167,11 @@ export default defineConfig(({ mode }) => {
 					changeOrigin: true,
 					bypass: (req) => {
 						// Don't proxy local TypeScript source files (e.g. @server alias resolves to /api/lib/*.ts)
-						if (req.url && req.url.endsWith('.ts')) return req.url
+						// Use pathname only so Vite's ?t= cache-bust timestamp doesn't break the match
+						if (req.url) {
+							const pathname = req.url.split('?')[0]
+							if (pathname.endsWith('.ts')) return req.url
+						}
 					},
 					...headers,
 				},
