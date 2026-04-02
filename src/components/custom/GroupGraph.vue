@@ -264,8 +264,9 @@
 			icon="add_link"
 			@click:close="connectMode = false"
 		>
-			Connect Mode active — drag from a node to another to create an
-			association. Click an edge to delete it.
+			<strong>Connect Mode:</strong> Hover a node to see its port handle
+			(blue dot), then drag to another node to create an association.
+			Click an existing edge (line) to delete it.
 		</v-alert>
 
 		<!-- Loading -->
@@ -947,6 +948,9 @@ export default {
 				manipulation: {
 					enabled: true,
 					initiallyActive: true,
+					addNode: false,
+					deleteNode: false,
+					deleteEdge: false,
 					addEdge: (data, callback) => {
 						callback(null) // prevent vis from adding a real edge
 						this.onConnectDrop(data.from, data.to)
@@ -2452,6 +2456,12 @@ export default {
 <style scoped>
 .fill-height {
 	height: 100%;
+}
+
+/* Hide vis-network's built-in manipulation toolbar — we use our own banner */
+:deep(.vis-manipulation),
+:deep(.vis-edit-mode) {
+	display: none !important;
 }
 
 .animate-pulse-chip {
