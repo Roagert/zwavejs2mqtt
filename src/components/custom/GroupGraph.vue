@@ -301,7 +301,7 @@
 		<!-- Graph canvas -->
 		<v-col
 			class="fill-height"
-			:style="{ opacity: loading ? 0 : '' }"
+			:style="{ opacity: loading ? 0 : '', position: 'relative' }"
 			cols="12"
 			ref="container"
 			v-resize="onResize"
@@ -321,6 +321,17 @@
 					>
 					<span class="text-caption font-weight-bold">Devices</span>
 					<v-spacer />
+					<v-tooltip text="Hide all" location="top">
+						<template #activator="{ props }">
+							<v-btn
+								v-bind="props"
+								icon="visibility_off"
+								size="x-small"
+								variant="text"
+								@click="hideAllNodes"
+							/>
+						</template>
+					</v-tooltip>
 					<v-tooltip text="Show all" location="top">
 						<template #activator="{ props }">
 							<v-btn
@@ -342,7 +353,7 @@
 				<v-divider />
 				<v-virtual-scroll
 					:items="legendDevices"
-					height="240"
+					:height="Math.min(240, containerHeight - 80)"
 					item-height="28"
 				>
 					<template #default="{ item }">
@@ -1057,6 +1068,18 @@ export default {
 				this.network.body.data.nodes.update(
 					toShow.map((id) => ({ id: `node_${id}`, hidden: false })),
 				)
+			}
+		},
+		hideAllNodes() {
+			const newHidden = {}
+			const updates = []
+			for (const n of this.legendDevices) {
+				newHidden[n.id] = true
+				updates.push({ id: `node_${n.id}`, hidden: true })
+			}
+			this.hiddenNodeIds = newHidden
+			if (this.network && updates.length) {
+				this.network.body.data.nodes.update(updates)
 			}
 		},
 		enableConnectMode() {
