@@ -1049,25 +1049,45 @@ export default {
 	},
 	methods: {
 		...mapActions(useBaseStore, ['setAssociations', 'clearAssociations']),
+		// Returns extra vis node IDs to hide/show alongside a device node:
+		// group diamonds owned by this device (Groups/NodeGroups views).
+		_ownedGroupNodeIds(deviceNodeId) {
+			if (!this.network) return []
+			return this.network.body.data.nodes
+				.get()
+				.filter(
+					(n) =>
+						n._type === 'group' &&
+						n._groupData?.nodeId === deviceNodeId,
+				)
+				.map((n) => n.id)
+		},
 		toggleNodeVisibility(nodeId) {
 			const hidden = !this.hiddenNodeIds[nodeId]
 			this.hiddenNodeIds = { ...this.hiddenNodeIds, [nodeId]: hidden }
-			// Apply immediately to live network without full repaint
 			if (this.network) {
-				const vid = `node_${nodeId}`
-				this.network.body.data.nodes.update({
-					id: vid,
-					hidden,
-				})
+				const updates = [{ id: `node_${nodeId}`, hidden }]
+				for (const gid of this._ownedGroupNodeIds(nodeId)) {
+					updates.push({ id: gid, hidden })
+				}
+				this.network.body.data.nodes.update(updates)
 			}
 		},
 		showAllNodes() {
-			const toShow = Object.keys(this.hiddenNodeIds)
+			const prevHidden = Object.keys(this.hiddenNodeIds)
 			this.hiddenNodeIds = {}
-			if (this.network && toShow.length) {
-				this.network.body.data.nodes.update(
-					toShow.map((id) => ({ id: `node_${id}`, hidden: false })),
-				)
+			if (this.network && prevHidden.length) {
+				const updates = prevHidden.map((id) => ({
+					id: `node_${id}`,
+					hidden: false,
+				}))
+				// Also un-hide any group diamonds that were hidden
+				for (const id of prevHidden) {
+					for (const gid of this._ownedGroupNodeIds(Number(id))) {
+						updates.push({ id: gid, hidden: false })
+					}
+				}
+				this.network.body.data.nodes.update(updates)
 			}
 		},
 		hideAllNodes() {
@@ -1076,6 +1096,9 @@ export default {
 			for (const n of this.legendDevices) {
 				newHidden[n.id] = true
 				updates.push({ id: `node_${n.id}`, hidden: true })
+				for (const gid of this._ownedGroupNodeIds(n.id)) {
+					updates.push({ id: gid, hidden: true })
+				}
 			}
 			this.hiddenNodeIds = newHidden
 			if (this.network && updates.length) {
@@ -2518,11 +2541,22 @@ export default {
 				this.network.setOptions({ physics: { enabled: false } })
 			})
 
-			// Re-apply hidden nodes after repaint
-			const hiddenUpdates = Object.entries(this.hiddenNodeIds)
-				.filter(([, hidden]) => hidden)
-				.map(([id]) => ({ id: `node_${id}`, hidden: true }))
-				.filter(({ id }) => visNodes.get(id))
+			// Re-apply hidden nodes after repaint (device nodes + their group diamonds)
+			const hiddenUpdates = []
+			for (const [id, hidden] of Object.entries(this.hiddenNodeIds)) {
+				if (!hidden) continue
+				const vid = `node_${id}`
+				if (visNodes.get(vid))
+					hiddenUpdates.push({ id: vid, hidden: true })
+				// Also hide group diamonds owned by this device
+				visNodes.get().forEach((n) => {
+					if (
+						n._type === 'group' &&
+						n._groupData?.nodeId === Number(id)
+					)
+						hiddenUpdates.push({ id: n.id, hidden: true })
+				})
+			}
 			if (hiddenUpdates.length) visNodes.update(hiddenUpdates)
 
 			// Re-apply connect mode if it was active before a repaint
