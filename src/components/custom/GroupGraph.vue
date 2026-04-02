@@ -1832,6 +1832,20 @@ export default {
 				}
 			}
 
+			// Pre-position device nodes in a circle so the graph starts spread out
+			const visibleIds = this.nodes
+				.filter((n) => !n.isControllerNode)
+				.map((n) => n.id)
+			const Rd = Math.max(300, visibleIds.length * 30)
+			visibleIds.forEach((nodeId, i) => {
+				const angle = ((i / visibleIds.length) * 2 - 0.5) * Math.PI * 2
+				visNodes.update({
+					id: `node_${nodeId}`,
+					x: Math.round(Rd * Math.cos(angle)),
+					y: Math.round(Rd * Math.sin(angle)),
+				})
+			})
+
 			this.createNetwork(visNodes, visEdges)
 		},
 
@@ -2052,6 +2066,37 @@ export default {
 					})
 				}
 			}
+
+			// Pre-position: each device in a circle, its groups fanned around it.
+			// This gives an immediate cluster layout without waiting for physics.
+			const groupsByDevice = {}
+			for (const g of filteredGroups) {
+				if (!groupsByDevice[g.nodeId]) groupsByDevice[g.nodeId] = []
+				groupsByDevice[g.nodeId].push(g)
+			}
+			const deviceIds = Object.keys(groupsByDevice).map(Number)
+			const R = Math.max(350, deviceIds.length * 55)
+			deviceIds.forEach((nodeId, i) => {
+				const angle = ((i / deviceIds.length) * 2 - 0.5) * Math.PI * 2
+				const dx = Math.round(R * Math.cos(angle))
+				const dy = Math.round(R * Math.sin(angle))
+				visNodes.update({
+					id: `node_${nodeId}`,
+					x: dx,
+					y: dy,
+					fixed: false,
+				})
+				const gs = groupsByDevice[nodeId]
+				const r = Math.max(70, gs.length * 14)
+				gs.forEach((g, j) => {
+					const ga = (j / gs.length) * 2 * Math.PI + angle
+					visNodes.update({
+						id: g.groupKey,
+						x: Math.round(dx + r * Math.cos(ga)),
+						y: Math.round(dy + r * Math.sin(ga)),
+					})
+				})
+			})
 
 			this.createNetwork(visNodes, visEdges)
 		},
