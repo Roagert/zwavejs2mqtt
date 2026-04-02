@@ -275,9 +275,10 @@
 			icon="add_link"
 			@click:close="connectMode = false"
 		>
-			<strong>Connect Mode:</strong> Hover a node to see its port handle
-			(blue dot), then drag to another node to create an association.
-			Click an existing edge (line) to delete it.
+			<strong>Connect Mode:</strong> Hover over a node — a small blue
+			square handle appears on its border. Drag from that handle to any
+			other node to create an association. Click an existing edge to
+			delete it.
 		</v-alert>
 
 		<!-- Loading -->
@@ -1107,22 +1108,32 @@ export default {
 		},
 		enableConnectMode() {
 			if (!this.network) return
+			// Configure manipulation with addEdge callback
 			this.network.setOptions({
 				manipulation: {
 					enabled: true,
-					initiallyActive: true,
 					addNode: false,
 					deleteNode: false,
 					deleteEdge: false,
 					addEdge: (data, callback) => {
-						callback(null) // prevent vis from adding a real edge
+						// Reject vis adding a real edge; handle ourselves
+						callback(null)
 						this.onConnectDrop(data.from, data.to)
+						// vis exits add-edge mode after a drop — re-enter it
+						this.$nextTick(() => {
+							if (this.connectMode && this.network) {
+								this.network.addEdgeMode()
+							}
+						})
 					},
 				},
 			})
+			// Programmatically enter add-edge mode (no toolbar button click needed)
+			this.network.addEdgeMode()
 		},
 		disableConnectMode() {
 			if (!this.network) return
+			this.network.disableEditMode()
 			this.network.setOptions({ manipulation: { enabled: false } })
 			this.pendingDeleteEdge = null
 			this.showDeleteSnackbar = false
