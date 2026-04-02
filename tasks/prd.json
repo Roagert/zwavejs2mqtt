@@ -1,0 +1,261 @@
+{
+  "id": "PRD-interactive-connector",
+  "title": "Interactive Association Connector Builder",
+  "version": "1.0",
+  "date": "2026-04-02",
+  "status": "approved",
+  "objective": "Add a drag-to-connect interaction to the Association Graph (Devices view) so users can create and delete Z-Wave associations directly on the canvas without touching the side panel. A 'Connect Mode' toggle enables vis-network's manipulation API; dragging from one node to another opens the existing DialogAssociation pre-filled with both endpoints locked; clicking an existing edge in connect mode shows a deletion snackbar.",
+
+  "scope": {
+    "in": [
+      "Connect Mode toggle button in GroupGraph toolbar (Devices view only)",
+      "vis-network manipulation.addEdge wiring for drag-to-connect ghost edge",
+      "onConnectDrop handler: guard logic + open DialogAssociation with lockedSource/lockedTarget",
+      "lockedSource / lockedTarget props on DialogAssociation to pre-fill and disable fields",
+      "_assocData stored on every visEdge in paintAssociationsView for reverse-lookup",
+      "selectEdge handler: show delete confirmation snackbar with 5-second window",
+      "confirmDeleteEdge: call removeAssociations, repaint graph, sync Pinia store",
+      "Auto-exit connect mode when user switches view mode"
+    ],
+    "out": [
+      "Multi-endpoint source drag (covered by side panel)",
+      "Connect mode in Groups / Node-to-Groups / Shared views",
+      "Mobile touch drag support",
+      "Changes to existing side-panel add/remove flow"
+    ]
+  },
+
+  "functional_requirements": [
+    {
+      "id": "FR-01",
+      "title": "visEdge metadata",
+      "description": "Every edge added to the vis DataSet in paintAssociationsView must carry _assocData containing sourceNodeId, sourceEndpoint, groupId, targetNodeId, targetEndpoint so the delete handler can identify the exact association without a reverse-lookup.",
+      "file": "src/components/custom/GroupGraph.vue",
+      "acceptance_criteria": [
+        "Every edge in Devices view has _assocData set",
+        "_assocData.sourceNodeId matches the node the group belongs to",
+        "_assocData.targetNodeId matches the member node"
+      ]
+    },
+    {
+      "id": "FR-02",
+      "title": "DialogAssociation locked props",
+      "description": "DialogAssociation.vue gains optional lockedSource and lockedTarget props (both Object|null). When set, the corresponding fields are pre-filled from the prop value and rendered disabled. Source endpoint defaults to 0 and is hidden when source is locked. Validation runs normally. Emitted payload is unchanged.",
+      "file": "src/components/dialogs/DialogAssociation.vue",
+      "acceptance_criteria": [
+        "Passing lockedSource pre-fills and disables the source node field",
+        "Passing lockedTarget pre-fills and disables the target node combobox",
+        "Association validation fires on dialog open when props are locked",
+        "Normal (unlocked) dialog usage is unaffected"
+      ]
+    },
+    {
+      "id": "FR-03",
+      "title": "Connect Mode toggle",
+      "description": "A toolbar button with icon add_link toggles connectMode (boolean, default false). Button is disabled with tooltip when viewMode !== 'associations'. A watcher sets connectMode = false when viewMode changes. An info banner is shown while connect mode is active.",
+      "file": "src/components/custom/GroupGraph.vue",
+      "acceptance_criteria": [
+        "Toggle button appears in GroupGraph toolbar",
+        "Button is disabled and shows tooltip outside Devices view",
+        "Switching view mode while connect mode is active exits connect mode",
+        "Info hint banner is visible while connect mode is on and dismissible"
+      ]
+    },
+    {
+      "id": "FR-04",
+      "title": "vis-network manipulation wiring",
+      "description": "Watch connectMode. On true: call network.setOptions({ manipulation: { enabled: true, initiallyActive: true, addEdge: callback } }) where callback calls onConnectDrop and passes null to the vis callback to suppress vis adding a real edge. On false: call network.setOptions({ manipulation: { enabled: false } }) and clear pendingDeleteEdge.",
+      "file": "src/components/custom/GroupGraph.vue",
+      "acceptance_criteria": [
+        "Entering connect mode enables vis manipulation with addEdge callback",
+        "Dragging from a node shows vis-network ghost edge and port handles",
+        "Exiting connect mode disables manipulation cleanly",
+        "Re-painting the graph does not re-enable manipulation unexpectedly"
+      ]
+    },
+    {
+      "id": "FR-05",
+      "title": "onConnectDrop handler",
+      "description": "onConnectDrop(fromVisId, toVisId): strip node_ prefix to get integer nodeIds; guard same-node and group-type vis nodes; look up ZUINode objects from Pinia store; set connectorSource and connectorTarget data properties; set showConnectorDialog = true. DialogAssociation instance in template wired to these properties with lockedSource and lockedTarget. On dialog add event: call addMember(). On cancel: no-op.",
+      "file": "src/components/custom/GroupGraph.vue",
+      "acceptance_criteria": [
+        "Dropping on same node does nothing",
+        "Dropping on a group diamond does nothing",
+        "Dropping on a valid target node opens DialogAssociation pre-filled and locked",
+        "Confirming the dialog creates the association and repaints the graph with Pinia store updated",
+        "Cancelling the dialog leaves no new association"
+      ]
+    },
+    {
+      "id": "FR-06",
+      "title": "Edge-click delete with snackbar",
+      "description": "Inside createNetwork, add selectEdge handler active only when connectMode is true. Gets _assocData from the clicked edge; sets pendingDeleteEdge and showDeleteSnackbar = true. Snackbar shows source and target node names, Confirm and Cancel buttons, 5-second timeout. confirmDeleteEdge() calls removeAssociations via apiRequest, fetches fresh associations, updates associationsMap, calls setAssociations, calls paintGraph. deselectEdge handler and Cancel button clear pendingDeleteEdge.",
+      "file": "src/components/custom/GroupGraph.vue",
+      "acceptance_criteria": [
+        "Clicking an edge in connect mode shows delete snackbar with node names",
+        "Confirming removes the association and repaints the graph",
+        "Cancelling or snackbar timeout deselects edge with no change",
+        "Clicking an edge outside connect mode does not show snackbar"
+      ]
+    }
+  ],
+
+  "non_functional_requirements": [
+    {
+      "id": "NFR-01",
+      "category": "Backward compatibility",
+      "requirement": "All existing side-panel add/remove flows must continue working exactly as before",
+      "measure": "No regressions in existing AssociationGroups or GroupGraph side-panel interactions"
+    },
+    {
+      "id": "NFR-02",
+      "category": "Performance",
+      "requirement": "Connect mode toggle and ghost-edge rendering must not cause frame drops in the vis-network canvas",
+      "measure": "No visible jank during drag on a 34-node network"
+    },
+    {
+      "id": "NFR-03",
+      "category": "UX consistency",
+      "requirement": "All new UI elements (button, banner, snackbar) must use Vuetify 3 components consistent with the existing codebase style",
+      "measure": "No raw HTML buttons or custom CSS; all colours from Vuetify theme"
+    }
+  ],
+
+  "technical_architecture": {
+    "runtime": "Vue 3 + Vuetify 3 + Pinia, vis-network 9.x, Node.js 22",
+    "key_files": [
+      "src/components/custom/GroupGraph.vue",
+      "src/components/dialogs/DialogAssociation.vue"
+    ],
+    "key_dependencies": [
+      "vis-network manipulation API (built-in, no new package)",
+      "Pinia store: nodes, nodesMap, associationsMap, setAssociations",
+      "apiRequest helper (existing pattern in GroupGraph)"
+    ],
+    "data_flow": "User drag → vis manipulation.addEdge callback → onConnectDrop → DialogAssociation (locked) → addMember() → apiRequest(addAssociations) → getAssociations refresh → setAssociations(Pinia) → paintGraph()"
+  },
+
+  "risks": [
+    {
+      "id": "R-01",
+      "risk": "vis-network manipulation toolbar overlaps existing UI chrome",
+      "likelihood": "medium",
+      "impact": "medium",
+      "mitigation": "Set manipulation.controlNodeStyle and use initiallyActive:true to skip the vis default toolbar; only the ghost-edge behaviour is needed, not vis's own add/delete buttons"
+    },
+    {
+      "id": "R-02",
+      "risk": "paintGraph() called mid-drag recreates the Network instance and loses manipulation mode",
+      "likelihood": "low",
+      "impact": "high",
+      "mitigation": "In createNetwork(), re-apply manipulation options based on current connectMode value; watcher on connectMode re-calls enableConnectMode after any repaint"
+    },
+    {
+      "id": "R-03",
+      "risk": "DialogAssociation locked-prop changes break existing callers that pass no props",
+      "likelihood": "low",
+      "impact": "medium",
+      "mitigation": "Both props default to null; all conditional rendering uses v-if on prop presence; existing usages pass no props and hit none of the new code paths"
+    }
+  ],
+
+  "tasks": [
+    {
+      "id": "TASK-009",
+      "title": "Store _assocData on each visEdge in paintAssociationsView",
+      "priority": "P1",
+      "status": "open",
+      "depends_on": [],
+      "fr": "FR-01",
+      "file": "src/components/custom/GroupGraph.vue",
+      "branch": "task/TASK-009-assoc-edge-metadata",
+      "max_iterations": 10
+    },
+    {
+      "id": "TASK-010",
+      "title": "Add lockedSource / lockedTarget props to DialogAssociation",
+      "priority": "P1",
+      "status": "open",
+      "depends_on": [],
+      "fr": "FR-02",
+      "file": "src/components/dialogs/DialogAssociation.vue",
+      "branch": "task/TASK-010-dialog-locked-props",
+      "max_iterations": 10
+    },
+    {
+      "id": "TASK-011",
+      "title": "Add Connect Mode toggle button to GroupGraph toolbar",
+      "priority": "P1",
+      "status": "open",
+      "depends_on": [],
+      "fr": "FR-03",
+      "file": "src/components/custom/GroupGraph.vue",
+      "branch": "task/TASK-011-connect-mode-toggle",
+      "max_iterations": 10
+    },
+    {
+      "id": "TASK-012",
+      "title": "Wire vis-network manipulation API for drag-to-connect",
+      "priority": "P1",
+      "status": "open",
+      "depends_on": ["TASK-011"],
+      "fr": "FR-04",
+      "file": "src/components/custom/GroupGraph.vue",
+      "branch": "task/TASK-012-vis-manipulation-wiring",
+      "max_iterations": 10
+    },
+    {
+      "id": "TASK-013",
+      "title": "Implement onConnectDrop — open DialogAssociation from drag result",
+      "priority": "P1",
+      "status": "open",
+      "depends_on": ["TASK-010", "TASK-012"],
+      "fr": "FR-05",
+      "file": "src/components/custom/GroupGraph.vue",
+      "branch": "task/TASK-013-on-connect-drop",
+      "max_iterations": 10
+    },
+    {
+      "id": "TASK-014",
+      "title": "Implement edge-click delete with confirmation snackbar",
+      "priority": "P1",
+      "status": "open",
+      "depends_on": ["TASK-009", "TASK-012"],
+      "fr": "FR-06",
+      "file": "src/components/custom/GroupGraph.vue",
+      "branch": "task/TASK-014-edge-delete-snackbar",
+      "max_iterations": 10
+    }
+  ],
+
+  "execution_order": [
+    ["TASK-009", "TASK-010", "TASK-011"],
+    ["TASK-012"],
+    ["TASK-013", "TASK-014"]
+  ],
+
+  "acceptance_criteria": [
+    "Connect toggle button visible in toolbar, disabled outside Devices view",
+    "Dragging from node A to node B opens DialogAssociation pre-filled with both nodes locked",
+    "Cancelling the dialog leaves no new association and no ghost edge",
+    "Confirming the dialog creates the association, graph repaints, Pinia store updated",
+    "Clicking an edge in connect mode shows delete snackbar naming source and target",
+    "Confirming delete removes the association, graph repaints",
+    "Switching view mode while connect mode is active automatically exits connect mode",
+    "Existing side-panel add/remove flow is unaffected"
+  ],
+
+  "ralph_loop": {
+    "max_iterations_per_task": 10,
+    "working_directory": "/home/roagert/projects/zwave-group-graph",
+    "validate_command": "npm run lint && npm run test",
+    "build_command": "npm run build",
+    "commit_convention": "TASK-{id} iter-{n}: {verb} {description}",
+    "dynamic_task_signals": [
+      "TODO/FIXME in committed code",
+      "lint errors after implementation",
+      "test failures referencing unimplemented behaviour",
+      "vis-network manipulation toolbar overlap"
+    ]
+  }
+}

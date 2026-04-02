@@ -9,7 +9,7 @@
 				<v-container grid-list-md>
 					<v-form v-model="valid" ref="form" validate-on="lazy">
 						<v-row>
-							<v-col cols="12">
+							<v-col cols="12" v-if="!lockedSource">
 								<v-select
 									label="Node Endpoint"
 									hint="Used to filter available groups"
@@ -71,6 +71,7 @@
 										hint="Node to add to the association group"
 										persistent-hint
 										item-title="_name"
+										:disabled="!!lockedTarget"
 									></v-combobox>
 								</v-col>
 
@@ -151,6 +152,8 @@ export default {
 		modelValue: Boolean,
 		associations: Array,
 		node: Object,
+		lockedSource: { type: Object, default: null },
+		lockedTarget: { type: Object, default: null },
 	},
 	watch: {
 		modelValue() {
@@ -159,6 +162,12 @@ export default {
 			this.associationError = ''
 			this.associationCheckResult = null
 			this.forceAssociation = false
+			if (this.lockedSource) {
+				this.group.endpoint = 0
+			}
+			if (this.lockedTarget) {
+				this.group.target = this.lockedTarget
+			}
 		},
 		group: {
 			deep: true,
