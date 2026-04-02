@@ -2259,23 +2259,31 @@ export default {
 
 			const isHierarchical = this.layoutMode === 'hierarchical'
 
+			// Scale physics by node count so dense graphs (Groups view with 400+
+			// diamonds) spread out as much as sparser graphs (Devices view).
+			const nodeCount = visNodes.length
+			const spread = Math.max(1, Math.sqrt(nodeCount / 30))
+			const gravitation = -8000 * spread
+			const springLen = Math.round(180 * spread)
+			const iterations = Math.min(1000, Math.round(300 * spread))
+
 			const options = {
 				physics: {
 					enabled: !isHierarchical,
 					stabilization: {
 						enabled: true,
-						iterations: 300,
+						iterations,
 						updateInterval: 25,
 						onlyDynamicEdges: false,
 						fit: true,
 					},
 					barnesHut: {
-						gravitationalConstant: -8000,
-						centralGravity: 0.05,
-						springLength: 180,
-						springConstant: 0.03,
+						gravitationalConstant: gravitation,
+						centralGravity: 0.03,
+						springLength: springLen,
+						springConstant: 0.02,
 						damping: 0.15,
-						avoidOverlap: 0.8,
+						avoidOverlap: 1.0,
 					},
 				},
 				layout: isHierarchical
