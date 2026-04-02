@@ -229,6 +229,17 @@
 									</v-btn>
 								</template>
 							</v-tooltip>
+							<v-btn
+								:color="
+									showDeviceFilter ? 'primary' : 'secondary'
+								"
+								variant="tonal"
+								size="small"
+								@click="showDeviceFilter = !showDeviceFilter"
+								prepend-icon="list"
+							>
+								Devices
+							</v-btn>
 							<v-chip
 								v-if="liveMode"
 								color="success"
@@ -296,6 +307,79 @@
 			v-resize="onResize"
 		>
 			<div :style="{ height: containerHeight + 'px' }" ref="content" />
+
+			<!-- Device filter overlay -->
+			<v-card
+				v-if="showDeviceFilter"
+				class="device-filter-panel"
+				elevation="6"
+				rounded="lg"
+			>
+				<div class="d-flex align-center pa-2 pb-1">
+					<v-icon size="small" class="mr-1" color="primary"
+						>devices</v-icon
+					>
+					<span class="text-caption font-weight-bold">Devices</span>
+					<v-spacer />
+					<v-tooltip text="Show all" location="top">
+						<template #activator="{ props }">
+							<v-btn
+								v-bind="props"
+								icon="visibility"
+								size="x-small"
+								variant="text"
+								@click="showAllNodes"
+							/>
+						</template>
+					</v-tooltip>
+					<v-btn
+						icon="close"
+						size="x-small"
+						variant="text"
+						@click="showDeviceFilter = false"
+					/>
+				</div>
+				<v-divider />
+				<v-virtual-scroll
+					:items="legendDevices"
+					height="240"
+					item-height="28"
+				>
+					<template #default="{ item }">
+						<v-list-item
+							density="compact"
+							class="px-2"
+							:style="{
+								opacity: hiddenNodeIds[item.id] ? 0.35 : 1,
+								cursor: 'pointer',
+							}"
+							@click="toggleNodeVisibility(item.id)"
+						>
+							<template #prepend>
+								<v-icon
+									size="x-small"
+									:color="
+										hiddenNodeIds[item.id]
+											? 'grey'
+											: getNodeStatusColor(item.id)
+									"
+									class="mr-1"
+									>{{
+										hiddenNodeIds[item.id]
+											? 'visibility_off'
+											: 'circle'
+									}}</v-icon
+								>
+							</template>
+							<v-list-item-title class="text-caption">
+								{{
+									item.name || item._name || 'Node ' + item.id
+								}}
+							</v-list-item-title>
+						</v-list-item>
+					</template>
+				</v-virtual-scroll>
+			</v-card>
 
 			<!-- Hover tooltip -->
 			<v-menu
@@ -789,6 +873,16 @@ export default {
 				this.managePanelGroupsFiltered.length
 			)
 		},
+		legendDevices() {
+			return this.nodes
+				.filter((n) => !n.isControllerNode)
+				.slice()
+				.sort((a, b) =>
+					(a.name || a._name || '').localeCompare(
+						b.name || b._name || '',
+					),
+				)
+		},
 	},
 	network: null,
 	_animationId: null,
@@ -820,6 +914,8 @@ export default {
 			selectedDetail: null, // kept for group-view diamond clicks
 			dragging: false,
 			connectMode: false,
+			showDeviceFilter: true,
+			hiddenNodeIds: {},
 			connectorSource: null,
 			connectorTarget: null,
 			showConnectorDialog: false,
@@ -942,6 +1038,27 @@ export default {
 	},
 	methods: {
 		...mapActions(useBaseStore, ['setAssociations', 'clearAssociations']),
+		toggleNodeVisibility(nodeId) {
+			const hidden = !this.hiddenNodeIds[nodeId]
+			this.hiddenNodeIds = { ...this.hiddenNodeIds, [nodeId]: hidden }
+			// Apply immediately to live network without full repaint
+			if (this.network) {
+				const vid = `node_${nodeId}`
+				this.network.body.data.nodes.update({
+					id: vid,
+					hidden,
+				})
+			}
+		},
+		showAllNodes() {
+			const toShow = Object.keys(this.hiddenNodeIds)
+			this.hiddenNodeIds = {}
+			if (this.network && toShow.length) {
+				this.network.body.data.nodes.update(
+					toShow.map((id) => ({ id: `node_${id}`, hidden: false })),
+				)
+			}
+		},
 		enableConnectMode() {
 			if (!this.network) return
 			this.network.setOptions({
@@ -2378,6 +2495,13 @@ export default {
 				this.network.setOptions({ physics: { enabled: false } })
 			})
 
+			// Re-apply hidden nodes after repaint
+			const hiddenUpdates = Object.entries(this.hiddenNodeIds)
+				.filter(([, hidden]) => hidden)
+				.map(([id]) => ({ id: `node_${id}`, hidden: true }))
+				.filter(({ id }) => visNodes.get(id))
+			if (hiddenUpdates.length) visNodes.update(hiddenUpdates)
+
 			// Re-apply connect mode if it was active before a repaint
 			if (this.connectMode) {
 				this.enableConnectMode()
@@ -2501,6 +2625,16 @@ export default {
 :deep(.vis-manipulation),
 :deep(.vis-edit-mode) {
 	display: none !important;
+}
+
+.device-filter-panel {
+	position: absolute;
+	top: 8px;
+	left: 8px;
+	z-index: 5;
+	min-width: 160px;
+	max-width: 210px;
+	pointer-events: all;
 }
 
 .animate-pulse-chip {
