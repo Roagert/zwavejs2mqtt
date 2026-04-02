@@ -1797,56 +1797,39 @@ export default {
 				})
 			}
 
-			// Build edge map: "${fromId}_${toId}" → [groupObj, ...]
-			const edgeMap = {}
+			// Add one edge per association (one per group membership)
 			for (const g of groups) {
 				if (!this.showLifelineGroups && g.isLifeline) continue
 				if (this.showDeadOnly && !g.hasDeadMember) continue
 				for (const m of g.members) {
-					const key = `${g.nodeId}_${m.nodeId}`
-					if (!edgeMap[key])
-						edgeMap[key] = {
-							nodeId: g.nodeId,
-							targetId: m.nodeId,
-							groupList: [],
-						}
-					edgeMap[key].groupList.push(g)
+					const color = g.hasDeadMember
+						? GROUP_DEAD_COLOR
+						: g.isLifeline
+							? '#888888'
+							: '#00BCD4'
+					visEdges.add({
+						id: `${g.nodeId}_ep${g.endpoint}_g${g.groupId}_${m.nodeId}_ep${m.targetEndpoint ?? 0}`,
+						from: `node_${g.nodeId}`,
+						to: `node_${m.nodeId}`,
+						title: g.title,
+						dashes: g.isLifeline,
+						color: {
+							color,
+							opacity: g.isLifeline ? 0.5 : 0.9,
+						},
+						arrows: { to: { enabled: true, scaleFactor: 0.6 } },
+						width: 2,
+						_type: 'association',
+						_groups: [g],
+						_assocData: {
+							sourceNodeId: g.nodeId,
+							sourceEndpoint: g.endpoint,
+							groupId: g.groupId,
+							targetNodeId: m.nodeId,
+							targetEndpoint: m.targetEndpoint ?? 0,
+						},
+					})
 				}
-			}
-
-			// Add one edge per (source, target) pair; label = group titles
-			for (const data of Object.values(edgeMap)) {
-				const allLifeline = data.groupList.every((g) => g.isLifeline)
-				const hasDead = data.groupList.some((g) => g.hasDeadMember)
-				const labels = data.groupList.map((g) => g.title).join('\n')
-				const color = hasDead
-					? GROUP_DEAD_COLOR
-					: allLifeline
-						? '#888888'
-						: '#00BCD4'
-				const firstGroup = data.groupList[0]
-				const firstMember = firstGroup.members.find(
-					(m) => m.nodeId === data.targetId,
-				)
-				visEdges.add({
-					id: `${data.nodeId}_${data.targetId}`,
-					from: `node_${data.nodeId}`,
-					to: `node_${data.targetId}`,
-					title: labels, // shown on hover, no inline label
-					dashes: false,
-					color: { color, opacity: allLifeline ? 0.5 : 0.9 },
-					arrows: { to: { enabled: true, scaleFactor: 0.6 } },
-					width: Math.min(data.groupList.length + 1, 4),
-					_type: 'association',
-					_groups: data.groupList,
-					_assocData: {
-						sourceNodeId: data.nodeId,
-						sourceEndpoint: firstGroup.endpoint,
-						groupId: firstGroup.groupId,
-						targetNodeId: data.targetId,
-						targetEndpoint: firstMember?.targetEndpoint ?? 0,
-					},
-				})
 			}
 
 			this.createNetwork(visNodes, visEdges)
