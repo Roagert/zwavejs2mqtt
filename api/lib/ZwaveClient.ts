@@ -1318,7 +1318,8 @@ class ZwaveClient extends TypedEventEmitter<ZwaveClientEventCallbacks> {
 			cntStatus: this.cntStatus,
 			inclusionState: this._inclusionState,
 			associations: this.homeHex
-				? ((jsonStore.get(store.associations) as any)?.[this.homeHex] ?? {})
+				? ((jsonStore.get(store.associations) as any)?.[this.homeHex] ??
+					{})
 				: {},
 		}
 	}
@@ -1899,7 +1900,9 @@ class ZwaveClient extends TypedEventEmitter<ZwaveClientEventCallbacks> {
 				nodeId,
 				associations,
 			})
-		} catch { /* ignore */ }
+		} catch {
+			/* ignore */
+		}
 	}
 
 	/**

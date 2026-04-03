@@ -8,16 +8,20 @@ created: 2026-03-30
 ---
 
 ## Description
+
 `removeMember()` sets `this.removeLoading[key] = true` before the API call. If `apiRequest` throws (network error, timeout), the line that resets it to `false` is never reached. The remove button shows a loading spinner forever.
 
 ## Root Cause
+
 `GroupGraph.vue:1555-1558` — no try/catch around the API await.
 
 ## Acceptance Criteria
+
 - [ ] `removeLoading[key]` is always reset to false when `removeMember()` exits
 - [ ] On API error, button returns to normal state (not stuck loading)
 
 ## Implementation Notes
+
 ```js
 async removeMember(group, member) {
     ...
@@ -31,8 +35,10 @@ async removeMember(group, member) {
     }
 }
 ```
+
 Or use try/finally for the reset.
 
 ## Execution Log
+
 | Iteration | Outcome | Notes |
 |-----------|---------|-------|

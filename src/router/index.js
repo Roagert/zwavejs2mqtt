@@ -15,6 +15,7 @@ const Zniffer = () => import('@/views/Zniffer.vue')
 const ConfigurationTemplates = () =>
 	import('@/views/ConfigurationTemplates.vue')
 const GroupGraph = () => import('@/views/GroupGraph.vue')
+const AssociationCheck = () => import('@/views/AssociationCheck.vue')
 
 import ConfigApis from '../apis/ConfigApis'
 import useBaseStore from '../stores/base'
@@ -33,6 +34,7 @@ export const Routes = {
 	zniffer: '/zniffer',
 	configurationTemplates: '/configuration-templates',
 	groupGraph: '/group-graph',
+	associationCheck: '/association-check',
 }
 
 Routes.main = Routes.controlPanel
@@ -144,6 +146,15 @@ const router = createRouter({
 			path: Routes.groupGraph,
 			name: 'Association Graph',
 			component: GroupGraph,
+			props: true,
+			meta: {
+				requiresAuth: true,
+			},
+		},
+		{
+			path: Routes.associationCheck,
+			name: 'Association Check',
+			component: AssociationCheck,
 			props: true,
 			meta: {
 				requiresAuth: true,

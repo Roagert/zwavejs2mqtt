@@ -548,6 +548,12 @@ export default {
 					title: 'Association Graph',
 					path: Routes.groupGraph,
 				})
+
+				pages.push({
+					icon: 'link_off',
+					title: 'Association Check',
+					path: Routes.associationCheck,
+				})
 			}
 
 			if (this.zniffer?.enabled) {

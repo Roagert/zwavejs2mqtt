@@ -132,7 +132,11 @@
 								variant="tonal"
 								size="small"
 								@click="toggleLiveMode"
-								:prepend-icon="liveMode ? 'wifi_tethering' : 'wifi_tethering_off'"
+								:prepend-icon="
+									liveMode
+										? 'wifi_tethering'
+										: 'wifi_tethering_off'
+								"
 								:disabled="!socket"
 							>
 								{{ liveMode ? 'Live On' : 'Live Off' }}
@@ -140,13 +144,21 @@
 
 							<v-btn
 								class="mt-2"
-								:color="groupHighlightMode ? 'cyan-darken-1' : 'secondary'"
+								:color="
+									groupHighlightMode
+										? 'cyan-darken-1'
+										: 'secondary'
+								"
 								variant="tonal"
 								size="small"
 								@click="toggleGroupHighlightMode"
 								prepend-icon="hub"
 							>
-								{{ groupHighlightMode ? 'Groups On' : 'Groups Off' }}
+								{{
+									groupHighlightMode
+										? 'Groups On'
+										: 'Groups Off'
+								}}
 							</v-btn>
 
 							<v-chip
@@ -160,7 +172,9 @@
 							</v-chip>
 
 							<div class="mt-4">
-								<v-list-subheader class="pa-0">Graph Mode</v-list-subheader>
+								<v-list-subheader class="pa-0"
+									>Graph Mode</v-list-subheader
+								>
 								<v-btn-toggle
 									v-model="graphMode"
 									mandatory
@@ -168,13 +182,19 @@
 									color="primary"
 									class="mt-1"
 								>
-									<v-btn value="routes" size="small">Routes</v-btn>
-									<v-btn value="locations" size="small">Locations</v-btn>
+									<v-btn value="routes" size="small"
+										>Routes</v-btn
+									>
+									<v-btn value="locations" size="small"
+										>Locations</v-btn
+									>
 								</v-btn-toggle>
 							</div>
 
 							<div class="mt-3">
-								<v-list-subheader class="pa-0">Layout</v-list-subheader>
+								<v-list-subheader class="pa-0"
+									>Layout</v-list-subheader
+								>
 								<v-btn-toggle
 									v-model="assocLayoutMode"
 									mandatory
@@ -182,8 +202,15 @@
 									color="primary"
 									class="mt-1"
 								>
-									<v-btn value="force" size="small">Default</v-btn>
-									<v-btn value="hierarchical" size="small" prepend-icon="account_tree">Hierarchy</v-btn>
+									<v-btn value="force" size="small"
+										>Default</v-btn
+									>
+									<v-btn
+										value="hierarchical"
+										size="small"
+										prepend-icon="account_tree"
+										>Hierarchy</v-btn
+									>
 								</v-btn-toggle>
 							</div>
 						</v-col>
@@ -337,7 +364,11 @@ export default {
 		},
 	},
 	computed: {
-		...mapState(useBaseStore, ['controllerNode', 'associationsMap', 'nodesMap']),
+		...mapState(useBaseStore, [
+			'controllerNode',
+			'associationsMap',
+			'nodesMap',
+		]),
 		content() {
 			return this.$refs.content
 		},
@@ -389,7 +420,10 @@ export default {
 			return this.nodes // replace this with `fakeNodes` when testing
 		},
 		hasAssociationData() {
-			return this.associationsMap && Object.keys(this.associationsMap).length > 0
+			return (
+				this.associationsMap &&
+				Object.keys(this.associationsMap).length > 0
+			)
 		},
 	},
 	network: null, // do not make this reactive, see https://github.com/visjs/vis-network/issues/173#issuecomment-541435420
@@ -951,9 +985,17 @@ export default {
 						avoidOverlap: 0.15,
 					},
 				},
-				layout: this.assocLayoutMode === 'hierarchical'
-					? { hierarchical: { enabled: true, direction: 'UD', sortMethod: 'directed', levelSeparation: 120 } }
-					: { hierarchical: false },
+				layout:
+					this.assocLayoutMode === 'hierarchical'
+						? {
+								hierarchical: {
+									enabled: true,
+									direction: 'UD',
+									sortMethod: 'directed',
+									levelSeparation: 120,
+								},
+							}
+						: { hierarchical: false },
 			}
 
 			this.network = new Network(container, data, options)
@@ -1140,7 +1182,11 @@ export default {
 
 				// Group highlight overlay
 				if (this.groupHighlightMode) {
-					if (nodeId && !this.allNodes.find((n) => n.id === nodeId)?.isControllerNode) {
+					if (
+						nodeId &&
+						!this.allNodes.find((n) => n.id === nodeId)
+							?.isControllerNode
+					) {
 						this.applyGroupHighlight(nodeId)
 					} else {
 						this.clearGroupOverlay()
@@ -1172,7 +1218,11 @@ export default {
 			const toRestore = []
 			nodes.forEach((n) => {
 				if (n._groupDimmed) {
-					toRestore.push({ id: n.id, opacity: 1.0, _groupDimmed: false })
+					toRestore.push({
+						id: n.id,
+						opacity: 1.0,
+						_groupDimmed: false,
+					})
 				}
 			})
 			if (toRestore.length) nodes.update(toRestore)
@@ -1197,18 +1247,28 @@ export default {
 				const targetId = assoc.nodeId
 				if (targetId == null) continue
 				const isLifeline = assoc.groupId === 1
-				overlayEdgeDefs.push({ fromId: clickedNodeId, toId: targetId, isLifeline })
+				overlayEdgeDefs.push({
+					fromId: clickedNodeId,
+					toId: targetId,
+					isLifeline,
+				})
 				relatedNodeIds.add(targetId)
 			}
 
 			// Reverse associations: senders → clickedNode
-			for (const [sourceIdStr, assocs] of Object.entries(this.associationsMap)) {
+			for (const [sourceIdStr, assocs] of Object.entries(
+				this.associationsMap,
+			)) {
 				const sourceId = parseInt(sourceIdStr)
 				if (sourceId === clickedNodeId) continue
 				for (const assoc of assocs) {
 					if (assoc.nodeId === clickedNodeId) {
 						const isLifeline = assoc.groupId === 1
-						overlayEdgeDefs.push({ fromId: sourceId, toId: clickedNodeId, isLifeline })
+						overlayEdgeDefs.push({
+							fromId: sourceId,
+							toId: clickedNodeId,
+							isLifeline,
+						})
 						relatedNodeIds.add(sourceId)
 						break
 					}
@@ -1475,9 +1535,16 @@ export default {
 
 			// Palette for location cluster nodes
 			const palette = [
-				'#00BCD4', '#7E57C2', '#26A69A', '#EF5350',
-				'#FF7043', '#29B6F6', '#66BB6A', '#FFA726',
-				'#EC407A', '#8D6E63',
+				'#00BCD4',
+				'#7E57C2',
+				'#26A69A',
+				'#EF5350',
+				'#FF7043',
+				'#29B6F6',
+				'#66BB6A',
+				'#FFA726',
+				'#EC407A',
+				'#8D6E63',
 			]
 			const locationColors = {}
 			let colorIdx = 0
@@ -1503,7 +1570,11 @@ export default {
 					id: `loc_${loc}`,
 					label: loc,
 					shape: 'ellipse',
-					color: { background: color, border: color, highlight: { background: color, border: '#fff' } },
+					color: {
+						background: color,
+						border: color,
+						highlight: { background: color, border: '#fff' },
+					},
 					font: { color: '#fff', size: 13, bold: true },
 					size: 24,
 					_type: 'location',
@@ -1556,7 +1627,14 @@ export default {
 					},
 				},
 				layout: isHierarchical
-					? { hierarchical: { enabled: true, direction: 'UD', sortMethod: 'directed', levelSeparation: 120 } }
+					? {
+							hierarchical: {
+								enabled: true,
+								direction: 'UD',
+								sortMethod: 'directed',
+								levelSeparation: 120,
+							},
+						}
 					: { hierarchical: false },
 				interaction: {
 					hover: true,
@@ -1686,7 +1764,12 @@ export default {
 				return
 			}
 			if (!from || !to) return
-			this.pulses.push({ from: { ...from }, to: { ...to }, progress: 0, color })
+			this.pulses.push({
+				from: { ...from },
+				to: { ...to },
+				progress: 0,
+				color,
+			})
 		},
 
 		startAnimation() {
