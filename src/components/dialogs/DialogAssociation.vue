@@ -9,7 +9,7 @@
 				<v-container grid-list-md>
 					<v-form v-model="valid" ref="form" validate-on="lazy">
 						<v-row>
-							<v-col cols="12" v-if="!lockedSource">
+							<v-col cols="12">
 								<v-select
 									label="Node Endpoint"
 									hint="Used to filter available groups"
@@ -162,9 +162,6 @@ export default {
 			this.associationError = ''
 			this.associationCheckResult = null
 			this.forceAssociation = false
-			if (this.lockedSource) {
-				this.group.endpoint = 0
-			}
 			if (this.lockedTarget) {
 				this.group.target = this.lockedTarget
 			}
@@ -258,6 +255,12 @@ export default {
 			forceAssociation: false,
 			defaultGroup: { endpoint: null },
 			required: (v) => !!v || 'This field is required',
+		}
+	},
+	created() {
+		this.resetGroup()
+		if (this.lockedTarget) {
+			this.group.target = this.lockedTarget
 		}
 	},
 	methods: {
@@ -362,9 +365,30 @@ export default {
 
 			if (node && node.endpoints) {
 				for (const endpoint of node.endpoints) {
+					const idx = endpoint.index
+					const rawLabel = endpoint.label
+					const isGeneric =
+						!rawLabel ||
+						rawLabel === `Endpoint ${idx}` ||
+						rawLabel.toLowerCase() === 'root endpoint'
+
+					if (idx === 0) {
+						endpoints.push({ title: 'Lifeline', value: 0 })
+						continue
+					}
+
+					// Annotate non-root endpoints with group titles
+					const epGroups = (node.groups || [])
+						.filter((g) => g.endpoint === idx)
+						.map((g) => g.title)
+						.join(', ')
+
+					const base = isGeneric
+						? `Endpoint ${idx}`
+						: `${rawLabel} (ep${idx})`
 					endpoints.push({
-						title: endpoint.label,
-						value: endpoint.index,
+						title: epGroups ? `${base} — ${epGroups}` : base,
+						value: idx,
 					})
 				}
 			}

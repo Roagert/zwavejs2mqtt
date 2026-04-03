@@ -275,10 +275,11 @@
 			icon="add_link"
 			@click:close="connectMode = false"
 		>
-			<strong>Connect Mode:</strong> Hover over a node — a small blue
-			square handle appears on its border. Drag from that handle to any
-			other node to create an association. Click an existing edge to
-			delete it.
+			<!-- eslint-disable-next-line vue/no-v-html -->
+			<span v-html="connectBannerText"></span>
+			<span class="ml-2 text-caption"
+				>Click an existing edge to delete it.</span
+			>
 		</v-alert>
 
 		<!-- Loading -->
@@ -885,6 +886,13 @@ export default {
 				this.managePanelGroupsFiltered.length
 			)
 		},
+		connectBannerText() {
+			if (this.connectPendingSource) {
+				const name = this.getNodeName(this.connectPendingSource)
+				return `Source selected: <strong>${name}</strong>. Now click the target device to create an association — or click the same node to cancel.`
+			}
+			return 'Click a <strong>source</strong> device (the one that sends commands), then click the <strong>target</strong> device (the one that receives them).'
+		},
 		legendDevices() {
 			return this.nodes
 				.filter((n) => !n.isControllerNode)
@@ -926,6 +934,7 @@ export default {
 			selectedDetail: null, // kept for group-view diamond clicks
 			dragging: false,
 			connectMode: false,
+			connectPendingSource: null, // nodeId of selected source (step 1)
 			showDeviceFilter: true,
 			hiddenNodeIds: {},
 			connectorSource: null,
@@ -1107,36 +1116,35 @@ export default {
 			}
 		},
 		enableConnectMode() {
-			if (!this.network) return
-			// Configure manipulation with addEdge callback
-			this.network.setOptions({
-				manipulation: {
-					enabled: true,
-					addNode: false,
-					deleteNode: false,
-					deleteEdge: false,
-					addEdge: (data, callback) => {
-						// Reject vis adding a real edge; handle ourselves
-						callback(null)
-						this.onConnectDrop(data.from, data.to)
-						// vis exits add-edge mode after a drop — re-enter it
-						this.$nextTick(() => {
-							if (this.connectMode && this.network) {
-								this.network.addEdgeMode()
-							}
-						})
-					},
-				},
-			})
-			// Programmatically enter add-edge mode (no toolbar button click needed)
-			this.network.addEdgeMode()
+			// No vis manipulation needed — using reliable two-click state machine
+			this.connectPendingSource = null
 		},
 		disableConnectMode() {
-			if (!this.network) return
-			this.network.disableEditMode()
-			this.network.setOptions({ manipulation: { enabled: false } })
+			this.cancelConnectSelection()
 			this.pendingDeleteEdge = null
 			this.showDeleteSnackbar = false
+		},
+		cancelConnectSelection() {
+			if (this.connectPendingSource && this.network) {
+				// Restore normal node appearance
+				this.network.unselectAll()
+			}
+			this.connectPendingSource = null
+		},
+		handleConnectNodeClick(nodeId) {
+			if (!this.connectPendingSource) {
+				// Step 1: select source — visually highlight it
+				this.connectPendingSource = nodeId
+				this.network?.selectNodes([`node_${nodeId}`])
+			} else if (nodeId === this.connectPendingSource) {
+				// Click same node again: cancel
+				this.cancelConnectSelection()
+			} else {
+				// Step 2: target selected — open association dialog
+				const sourceId = this.connectPendingSource
+				this.cancelConnectSelection()
+				this.onConnectDrop(`node_${sourceId}`, `node_${nodeId}`)
+			}
 		},
 		onConnectDrop(fromVisId, toVisId) {
 			if (fromVisId === toVisId) return
@@ -1163,6 +1171,13 @@ export default {
 				endpoint: group.endpoint ?? undefined,
 			}
 			const target = { nodeId: this.connectorTarget.id }
+			if (
+				group.group?.multiChannel &&
+				group.targetEndpoint != null &&
+				group.targetEndpoint >= 0
+			) {
+				target.endpoint = group.targetEndpoint
+			}
 			const resp = await this.app.apiRequest('addAssociations', [
 				source,
 				group.group.value,
@@ -2570,9 +2585,10 @@ export default {
 			}
 			if (hiddenUpdates.length) visNodes.update(hiddenUpdates)
 
-			// Re-apply connect mode if it was active before a repaint
-			if (this.connectMode) {
-				this.enableConnectMode()
+			// Connect mode uses click events — no vis options to re-apply.
+			// If a source was pending when repaint fired, clear it (graph changed).
+			if (this.connectPendingSource) {
+				this.connectPendingSource = null
 			}
 
 			// Pulse rendering — draw on vis-network's own canvas each frame
@@ -2636,6 +2652,23 @@ export default {
 			})
 
 			this.network.on('click', (params) => {
+				// Connect mode: two-click state machine
+				if (this.connectMode) {
+					if (
+						params.nodes.length === 0 &&
+						params.edges.length === 0
+					) {
+						this.cancelConnectSelection()
+					} else if (params.nodes.length > 0) {
+						const nodeData = visNodes.get(params.nodes[0])
+						if (nodeData?._type !== 'group' && nodeData?._nodeId) {
+							this.handleConnectNodeClick(nodeData._nodeId)
+						}
+					}
+					return
+				}
+
+				// Normal mode
 				if (params.nodes.length === 0) {
 					this.showDetail = false
 					return
